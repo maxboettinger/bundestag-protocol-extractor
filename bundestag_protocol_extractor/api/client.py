@@ -1,11 +1,21 @@
 """
 API client for the Bundestag DIP API.
+
+This module provides a client for interacting with the German Bundestag's DIP API,
+handling authentication, rate limiting, XML retrieval, and data extraction.
 """
-from typing import Dict, List, Optional, Union, Any, Tuple
-import requests
+import logging
 import re
+import time
 import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Union, Any, Tuple
 from urllib.parse import urljoin
+
+import requests
+
+from bundestag_protocol_extractor.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BundestagAPIClient:
@@ -39,7 +49,8 @@ class BundestagAPIClient:
         format_xml: bool = False,
         retry_count: int = 0,
         max_retries: int = 0,
-        retry_delay: float = 1.0
+        retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
     ) -> Union[Dict[str, Any], str]:
         """
         Make a request to the API with rate limiting handling.
@@ -51,11 +62,11 @@ class BundestagAPIClient:
             retry_count: Current retry attempt (for internal use)
             max_retries: Maximum number of retries in case of rate limiting
             retry_delay: Base delay in seconds between retries (will use exponential backoff)
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             Response JSON data or XML string
         """
-        import time
         url = urljoin(self.BASE_URL, endpoint)
         
         # Initialize params if None
@@ -73,16 +84,30 @@ class BundestagAPIClient:
             # Explicitly request JSON format to be safe
             params["format"] = "json"
         
+        # Record API call in progress tracker if provided
+        if progress_tracker:
+            progress_tracker.update_api_stats(api_call=True)
+        
+        logger.debug(f"API request: {endpoint} (params: {params})")
+        
         try:
             response = self.session.get(url, params=params)
             
             # Check for rate limiting response (DIP API uses .enodia/challenge in the redirect URL)
             if response.status_code in [429, 400, 403] or '.enodia/challenge' in response.url:
+                if progress_tracker:
+                    progress_tracker.update_api_stats(rate_limit=True)
+                
                 if retry_count < max_retries:
                     # Calculate delay with exponential backoff
                     wait_time = retry_delay * (2 ** retry_count)
-                    print(f"Rate limit detected, retrying in {wait_time:.1f}s (attempt {retry_count+1}/{max_retries})")
+                    logger.warning(f"Rate limit detected, retrying in {wait_time:.1f}s "
+                                  f"(attempt {retry_count+1}/{max_retries})")
                     time.sleep(wait_time)
+                    
+                    # Record retry in progress tracker if provided
+                    if progress_tracker:
+                        progress_tracker.update_api_stats(retry=True)
                     
                     # Recursive retry with increased counter
                     return self._make_request(
@@ -91,14 +116,19 @@ class BundestagAPIClient:
                         format_xml=format_xml,
                         retry_count=retry_count + 1,
                         max_retries=max_retries,
-                        retry_delay=retry_delay
+                        retry_delay=retry_delay,
+                        progress_tracker=progress_tracker
                     )
                 else:
                     # If we've exhausted retries, raise the error
+                    logger.error(f"Rate limit persists after {max_retries} retries")
                     response.raise_for_status()
             
             # For other errors, just raise immediately
             response.raise_for_status()
+            
+            # Log success at debug level
+            logger.debug(f"API request successful: {endpoint}")
             
             if format_xml:
                 return response.text
@@ -107,12 +137,17 @@ class BundestagAPIClient:
         except requests.exceptions.HTTPError as e:
             # Log the full URL that failed for easier debugging
             full_url = response.request.url
-            print(f"API request failed: {full_url}")
+            logger.error(f"API request failed: {full_url}")
+            logger.error(f"Response status: {response.status_code}, content: {response.text[:200]}")
+            raise
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request exception for {endpoint}: {str(e)}")
             raise
 
     def get_all_results(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None,
-        max_retries: int = 3, retry_delay: float = 1.0
+        max_retries: int = 3, retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
         Get all results for a paginated endpoint using cursor-based pagination.
@@ -122,33 +157,47 @@ class BundestagAPIClient:
             params: Query parameters
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             List of all documents
         """
-        import time
-        
         params = params or {}
         all_documents = []
         
+        logger.info(f"Fetching all results for {endpoint} with pagination")
+        
         # Initial request with retry support
-        response = self._make_request(endpoint, params, 
-                                    max_retries=max_retries, 
-                                    retry_delay=retry_delay)
-        all_documents.extend(response.get("documents", []))
+        response = self._make_request(
+            endpoint, params,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            progress_tracker=progress_tracker
+        )
+        
+        documents = response.get("documents", [])
+        all_documents.extend(documents)
+        logger.info(f"Retrieved {len(documents)} items in first page")
         
         # Continue fetching until cursor doesn't change
         current_cursor = response.get("cursor")
         page_count = 1
+        
+        # Use TQDM for progress if we have an estimated total
+        total_estimate = response.get("numFound", 0)
         
         while current_cursor:
             # Add a small delay between pagination requests to avoid rate limiting
             time.sleep(retry_delay)
             
             params["cursor"] = current_cursor
-            response = self._make_request(endpoint, params, 
-                                        max_retries=max_retries, 
-                                        retry_delay=retry_delay)
+            response = self._make_request(
+                endpoint, params,
+                max_retries=max_retries,
+                retry_delay=retry_delay,
+                progress_tracker=progress_tracker
+            )
+            
             documents = response.get("documents", [])
             
             # If no new documents or cursor hasn't changed, we're done
@@ -161,12 +210,19 @@ class BundestagAPIClient:
             
             # Log progress for large datasets
             if page_count % 5 == 0:
-                print(f"Retrieved {len(all_documents)} items in {page_count} pages...")
+                logger.info(f"Retrieved {len(all_documents)}/{total_estimate} items in {page_count} pages")
+        
+        logger.info(f"Completed pagination: {len(all_documents)} total items in {page_count} pages")
             
         return all_documents
 
-    def get_plenarprotokoll_list(self, wahlperiode: int = 20, 
-                            max_retries: int = 3, retry_delay: float = 1.0) -> List[Dict[str, Any]]:
+    def get_plenarprotokoll_list(
+        self, 
+        wahlperiode: int = 20, 
+        max_retries: int = 3, 
+        retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get a list of plenarprotokolle for the specified legislative period.
         Based on the API endpoint: GET /plenarprotokoll
@@ -175,16 +231,29 @@ class BundestagAPIClient:
             wahlperiode: Legislative period (default: 20)
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             List of plenarprotokolle metadata
         """
         params = {"f.wahlperiode": wahlperiode}
-        return self.get_all_results("plenarprotokoll", params, 
-                                   max_retries=max_retries, 
-                                   retry_delay=retry_delay)
+        logger.info(f"Retrieving list of plenarprotokolle for Wahlperiode {wahlperiode}")
+        
+        return self.get_all_results(
+            "plenarprotokoll", 
+            params, 
+            max_retries=max_retries, 
+            retry_delay=retry_delay,
+            progress_tracker=progress_tracker
+        )
 
-    def get_plenarprotokoll(self, id: int, max_retries: int = 3, retry_delay: float = 1.0) -> Dict[str, Any]:
+    def get_plenarprotokoll(
+        self, 
+        id: int, 
+        max_retries: int = 3, 
+        retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
+    ) -> Dict[str, Any]:
         """
         Get metadata for a specific plenarprotokoll.
         Based on the API endpoint: GET /plenarprotokoll/{id}
@@ -193,16 +262,27 @@ class BundestagAPIClient:
             id: ID of the plenarprotokoll
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             Plenarprotokoll metadata
         """
-        return self._make_request(f"plenarprotokoll/{id}", 
-                                max_retries=max_retries, 
-                                retry_delay=retry_delay)
+        logger.debug(f"Retrieving metadata for plenarprotokoll ID {id}")
+        return self._make_request(
+            f"plenarprotokoll/{id}", 
+            max_retries=max_retries, 
+            retry_delay=retry_delay,
+            progress_tracker=progress_tracker
+        )
 
-    def get_plenarprotokoll_text(self, id: int, format_xml: bool = False, 
-                                max_retries: int = 3, retry_delay: float = 1.0) -> Union[Dict[str, Any], str]:
+    def get_plenarprotokoll_text(
+        self, 
+        id: int, 
+        format_xml: bool = False, 
+        max_retries: int = 3, 
+        retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
+    ) -> Union[Dict[str, Any], str]:
         """
         Get full text and metadata for a specific plenarprotokoll.
         Based on the API endpoint: GET /plenarprotokoll-text/{id}
@@ -212,16 +292,25 @@ class BundestagAPIClient:
             format_xml: If True, request XML format and return as string
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             Plenarprotokoll full text and metadata as JSON or XML string
         """
-        return self._make_request(f"plenarprotokoll-text/{id}", 
-                                format_xml=format_xml,
-                                max_retries=max_retries, 
-                                retry_delay=retry_delay)
+        logger.debug(f"Retrieving {'XML' if format_xml else 'text'} for plenarprotokoll ID {id}")
+        return self._make_request(
+            f"plenarprotokoll-text/{id}", 
+            format_xml=format_xml,
+            max_retries=max_retries, 
+            retry_delay=retry_delay,
+            progress_tracker=progress_tracker
+        )
     
-    def get_plenarprotokoll_xml(self, plenarprotokoll_data: Dict[str, Any]) -> Optional[ET.Element]:
+    def get_plenarprotokoll_xml(
+        self, 
+        plenarprotokoll_data: Dict[str, Any],
+        progress_tracker: Optional[Any] = None
+    ) -> Optional[ET.Element]:
         """
         Get the XML version of a plenarprotokoll from the Bundestag website.
         Uses direct URL approach based on the example: 
@@ -229,6 +318,7 @@ class BundestagAPIClient:
         
         Args:
             plenarprotokoll_data: Plenarprotokoll metadata from the API
+            progress_tracker: Optional progress tracker to update API stats
             
         Returns:
             XML root element or None if not found
@@ -238,18 +328,21 @@ class BundestagAPIClient:
             protocol_id = int(plenarprotokoll_data["id"])
             wahlperiode = str(plenarprotokoll_data["wahlperiode"])
             dokument_nummer = plenarprotokoll_data["dokumentnummer"].split("/")[-1]
+            doc_identifier = f"{wahlperiode}/{dokument_nummer}"
+            
+            logger.info(f"Retrieving XML for protocol {doc_identifier} (ID: {protocol_id})")
             
             # First try a direct approach with the PDF URL
             document_id = None
             if "fundstelle" in plenarprotokoll_data and "pdf_url" in plenarprotokoll_data["fundstelle"]:
                 pdf_url = plenarprotokoll_data["fundstelle"]["pdf_url"]
-                print(f"Found PDF URL: {pdf_url}")
+                logger.debug(f"Found PDF URL: {pdf_url}")
                 
                 # Extract document ID from PDF URL if possible
                 match = re.search(r'blob/(\d+)/', pdf_url)
                 if match:
                     document_id = match.group(1)
-                    print(f"Extracted document ID: {document_id}")
+                    logger.debug(f"Extracted document ID: {document_id}")
             
             # URLs to try
             urls_to_try = []
@@ -268,38 +361,49 @@ class BundestagAPIClient:
                 pdf_url_base = pdf_url.replace('.pdf', '')
                 urls_to_try.append(f"{pdf_url_base}.xml")
             
+            logger.info(f"Attempting {len(urls_to_try)} possible XML URLs for protocol {doc_identifier}")
+            
             # Try each URL
             for url in urls_to_try:
-                print(f"Trying XML URL: {url}")
+                logger.debug(f"Trying XML URL: {url}")
+                
+                # Update API stats in progress tracker
+                if progress_tracker:
+                    progress_tracker.update_api_stats(api_call=True)
+                    
                 try:
                     response = requests.get(url)
                     if response.status_code == 200:
-                        print(f"Successfully retrieved XML from {url}")
+                        logger.info(f"Successfully retrieved XML from {url}")
                         try:
                             root = ET.fromstring(response.text)
                             return root
                         except ET.ParseError as e:
-                            print(f"XML parsing error: {e}")
+                            logger.warning(f"XML parsing error: {e}")
                     else:
-                        print(f"HTTP error {response.status_code} for URL: {url}")
+                        logger.debug(f"HTTP error {response.status_code} for URL: {url}")
                 except requests.RequestException as e:
-                    print(f"Request error for {url}: {e}")
+                    logger.debug(f"Request error for {url}: {e}")
             
             # If all URLs failed, try the API with XML format
-            print("All direct URL attempts failed, trying API with XML format...")
+            logger.info("All direct URL attempts failed, trying API with XML format...")
             try:
-                xml_text = self.get_plenarprotokoll_text(protocol_id, format_xml=True)
+                xml_text = self.get_plenarprotokoll_text(
+                    protocol_id, 
+                    format_xml=True,
+                    progress_tracker=progress_tracker
+                )
                 root = ET.fromstring(xml_text)
-                print("Successfully retrieved XML from API")
+                logger.info("Successfully retrieved XML from API")
                 return root
             except Exception as e:
-                print(f"Could not get XML from API: {e}")
+                logger.error(f"Could not get XML from API: {e}")
             
-            print(f"Could not find XML for protocol {plenarprotokoll_data.get('dokumentnummer', protocol_id)}")
+            logger.warning(f"Could not find XML for protocol {doc_identifier}")
             return None
             
         except Exception as e:
-            print(f"Error retrieving XML: {e}")
+            logger.error(f"Error retrieving XML: {e}", exc_info=True)
             return None
     
 # Method removed as we now extract document ID directly from PDF URL in get_plenarprotokoll_xml
@@ -571,7 +675,8 @@ class BundestagAPIClient:
         wahlperiode: Optional[int] = None,
         aktivitaetsart: Optional[str] = None,
         max_retries: int = 3, 
-        retry_delay: float = 1.0
+        retry_delay: float = 1.0,
+        progress_tracker: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
         Get a list of activities.
@@ -583,6 +688,7 @@ class BundestagAPIClient:
             aktivitaetsart: Filter by activity type (e.g. "Rede")
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            progress_tracker: Optional progress tracker to update API stats
 
         Returns:
             List of activity metadata
@@ -595,7 +701,8 @@ class BundestagAPIClient:
         
         activities = self.get_all_results("aktivitaet", params, 
                                         max_retries=max_retries, 
-                                        retry_delay=retry_delay)
+                                        retry_delay=retry_delay,
+                                        progress_tracker=progress_tracker)
         
         # Filter by aktivitaetsart if provided
         if aktivitaetsart:

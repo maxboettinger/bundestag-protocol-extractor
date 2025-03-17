@@ -121,3 +121,4 @@ dmypy.json
 # Project specific
 data/
 output/
+.DS_STORE
