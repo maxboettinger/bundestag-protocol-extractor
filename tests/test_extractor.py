@@ -5,7 +5,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from extractor import BundestagExtractor
+from bundestag_protocol_extractor import BundestagExtractor
 from bundestag_protocol_extractor.models.schema import Person, Speech, PlenarProtocol
 
 
@@ -15,10 +15,10 @@ class TestBundestagExtractor(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         # Mock dependencies
-        self.mock_api_client = mock.patch('extractor.BundestagAPIClient').start()
-        self.mock_parser = mock.patch('extractor.ProtocolParser').start()
-        self.mock_exporter = mock.patch('extractor.Exporter').start()
-        self.mock_progress_tracker = mock.patch('extractor.ProgressTracker').start()
+        self.mock_api_client = mock.patch('bundestag_protocol_extractor.extractor.BundestagAPIClient').start()
+        self.mock_parser = mock.patch('bundestag_protocol_extractor.extractor.ProtocolParser').start()
+        self.mock_exporter = mock.patch('bundestag_protocol_extractor.extractor.Exporter').start()
+        self.mock_progress_tracker = mock.patch('bundestag_protocol_extractor.extractor.ProgressTracker').start()
         
         # Setup test directory
         self.test_output_dir = "test_output"
