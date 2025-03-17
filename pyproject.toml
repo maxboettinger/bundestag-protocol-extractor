@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Max Boettinger", email = "github@bttngr.de"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -47,8 +47,8 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/bundestag-protocol-extractor"
-Issues = "https://github.com/yourusername/bundestag-protocol-extractor/issues"
+Homepage = "https://github.com/maxboettinger/bundestag-protocol-extractor"
+Issues = "https://github.com/maxboettinger/bundestag-protocol-extractor/issues"
 
 [project.scripts]
 bpe = "bundestag_protocol_extractor.cli:main"
