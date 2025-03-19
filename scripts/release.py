@@ -121,16 +121,77 @@ def commit_version_changes(version: Tuple[int, int, int]) -> None:
     print(f"Committed version changes for {version_str}")
 
 
-def build_package() -> None:
-    """Build the package."""
+def run_tests() -> bool:
+    """
+    Run tests to ensure package quality before release.
+    
+    Returns:
+        bool: True if tests pass, False otherwise
+    """
+    print("Running tests before release...")
+    
+    # Run all tests with pytest
+    try:
+        print("Running pytest suite...")
+        run_command(["pytest", "-xvs"])
+    except subprocess.CalledProcessError:
+        print("❌ Tests failed! Fix the issues before releasing.")
+        return False
+    
+    # Verify package structure with twine check
+    try:
+        print("Verifying package structure with additional packaging tests...")
+        
+        # Test package can be installed and imported in a clean environment
+        test_import_cmd = [
+            "python", "-c", 
+            "import importlib.util; "
+            "spec = importlib.util.find_spec('bundestag_protocol_extractor.utils.logging'); "
+            "print('✓ Critical module check: logging module can be imported' if spec else '❌ Critical module check: logging module MISSING!')"
+        ]
+        
+        # Run the import test
+        result = subprocess.run(test_import_cmd, capture_output=True, text=True, check=False)
+        print(result.stdout.strip())
+        
+        if "MISSING" in result.stdout:
+            print("❌ Critical module check failed. Package may be missing required modules.")
+            return False
+        
+    except subprocess.CalledProcessError:
+        print("❌ Package verification failed!")
+        return False
+    
+    print("✅ All tests passed!")
+    return True
+
+
+def build_package() -> bool:
+    """
+    Build the package.
+    
+    Returns:
+        bool: True if package built successfully, False otherwise
+    """
     # Clean dist directory
     if os.path.exists("dist"):
         for file in os.listdir("dist"):
             os.unlink(os.path.join("dist", file))
 
     # Build package
-    run_command(["python", "-m", "build"])
-    print("Built distribution packages")
+    try:
+        run_command(["python", "-m", "build"])
+        print("✅ Built distribution packages")
+        
+        # Verify the built distribution with twine
+        print("Verifying built packages with twine...")
+        run_command(["twine", "check", "dist/*"])
+        print("✅ Package verification passed")
+        
+        return True
+    except subprocess.CalledProcessError:
+        print("❌ Package build or verification failed!")
+        return False
 
 
 def upload_to_pypi(test: bool = False) -> None:
@@ -206,10 +267,69 @@ def main():
     # Create git tag
     create_git_tag(new_version)
 
+    # Run tests before building
+    print("\n=== Running tests before release ===")
+    if not run_tests():
+        print("\n❌ Tests failed. Release aborted.")
+        return
+    
     # Build package
-    build_package()
-
+    print("\n=== Building package ===")
+    if not build_package():
+        print("\n❌ Package build failed. Release aborted.")
+        return
+        
+    # Verify the built package in a virtual environment
+    print("\n=== Testing installation in virtual environment ===")
+    try:
+        # Create and activate a temporary virtual environment
+        venv_dir = ".temp_venv"
+        if os.path.exists(venv_dir):
+            if sys.platform == 'win32':
+                run_command(["rd", "/s", "/q", venv_dir], check=False)
+            else:
+                run_command(["rm", "-rf", venv_dir], check=False)
+        
+        # Create new venv
+        run_command([sys.executable, "-m", "venv", venv_dir])
+        
+        # Determine activation command based on platform
+        if sys.platform == 'win32':
+            activate_cmd = f"{venv_dir}\\Scripts\\activate"
+            python_cmd = f"{venv_dir}\\Scripts\\python"
+        else:
+            activate_cmd = f"source {venv_dir}/bin/activate"
+            python_cmd = f"{venv_dir}/bin/python"
+        
+        # Install the package in the venv
+        print("Installing package in test environment...")
+        wheel_file = next(Path("dist").glob("*.whl"))
+        run_command([python_cmd, "-m", "pip", "install", str(wheel_file)])
+        
+        # Test importing the critical module
+        print("Verifying critical module imports...")
+        test_import_cmd = [
+            python_cmd, "-c", 
+            "import importlib.util; "
+            "import bundestag_protocol_extractor.utils.logging; "
+            "print('✅ Successfully imported bundestag_protocol_extractor.utils.logging')"
+        ]
+        run_command(test_import_cmd)
+        
+        # Clean up temp environment
+        if os.path.exists(venv_dir):
+            if sys.platform == 'win32':
+                run_command(["rd", "/s", "/q", venv_dir], check=False)
+            else:
+                run_command(["rm", "-rf", venv_dir], check=False)
+        
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Installation test failed: {e}")
+        print("The package may not work correctly when installed. Release aborted.")
+        return
+    
     # Ask for confirmation before uploading
+    print("\n=== Upload to PyPI ===")
     if args.test:
         destination = "TestPyPI"
     else:

@@ -172,6 +172,45 @@ Visit: [Dokumentations- und Informationssystems für Parlamentsmaterialien (DIP)
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+### Development Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/maxboettinger/bundestag-protocol-extractor.git
+   cd bundestag-protocol-extractor
+   ```
+
+2. Create a conda environment:
+   ```bash
+   conda env create -f environment.yml
+   conda activate bundestag-protocol-extractor
+   ```
+
+3. Install the package in development mode:
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+4. Run tests:
+   ```bash
+   pytest
+   ```
+
+### Making a Release
+
+The package includes a comprehensive release script that verifies package integrity:
+
+```bash
+python scripts/release.py [major|minor|patch]
+```
+
+The release process:
+1. Runs all tests including import verification
+2. Builds distribution packages
+3. Verifies the built package in a virtual environment
+4. Ensures critical modules like utils.logging are included
+5. Uploads to PyPI (with confirmation)
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
