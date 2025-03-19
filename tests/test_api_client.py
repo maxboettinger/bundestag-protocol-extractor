@@ -101,6 +101,9 @@ class TestBundestagAPIClient(unittest.TestCase):
         mock_response = mock.MagicMock()
         mock_response.status_code = 200
         mock_response.text = "<protokoll><id>123</id></protokoll>"
+        # Important: Set content attribute to bytes to match our decode method
+        xml_content = "<?xml version='1.0' encoding='UTF-8'?>\n<protokoll><id>123</id></protokoll>"
+        mock_response.content = xml_content.encode('utf-8')
         mock_get.return_value = mock_response
         
         # Mock data for plenarprotokoll
