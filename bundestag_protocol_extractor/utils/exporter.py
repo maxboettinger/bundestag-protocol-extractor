@@ -75,6 +75,7 @@ class Exporter:
             "speaker_function": speech.speaker.funktion,
             "speaker_ministry": speech.speaker.ressort,
             "speaker_state": speech.speaker.bundesland,
+            "is_interjection": speech.is_interjection
         }
 
         return speech_dict

@@ -514,28 +514,35 @@ class BundestagAPIClient:
                     if section_elem is not None:
                         page_section = section_elem.text
 
-            # Extract paragraphs of speech text
+            # Extract paragraphs and comments
             paragraphs = []
-            p_elems = rede.findall(".//p")
-            for p in p_elems:
-                # Skip non-text elements or elements with no text
-                if p.text is None:
-                    continue
-
-                # Get paragraph text
-                paragraph_text = p.text.strip()
-
-                # Get paragraph class/type if available
-                paragraph_class = p.get("klasse", "")
-
-                paragraphs.append({"text": paragraph_text, "type": paragraph_class})
-
-            # Extract comments
             comments = []
-            comment_elems = rede.findall(".//kommentar")
-            for comment in comment_elems:
-                if comment.text:
-                    comments.append(comment.text.strip())
+            is_interjection = False
+            
+            # Process all child elements in order
+            for elem in rede:
+                if elem.tag == "p":
+                    # Get paragraph text and class
+                    text = elem.text.strip() if elem.text else ""
+                    paragraph_class = elem.get("klasse", "")
+                    
+                    if text:
+                        paragraphs.append({"text": text, "type": paragraph_class})
+                        
+                        # Check for interjection indicators in text
+                        if any(text.startswith(pattern) for pattern in [
+                            "(Beifall", "(Zuruf", "(Lachen", "(Heiterkeit",
+                            "(Widerspruch", "(Zwischenruf"
+                        ]):
+                            is_interjection = True
+                            
+                elif elem.tag == "kommentar":
+                    # Process kommentar elements
+                    comment_text = elem.text.strip() if elem.text else ""
+                    if comment_text:
+                        comments.append(comment_text)
+                        paragraphs.append({"text": comment_text, "type": "kommentar"})
+                        is_interjection = True  # Any kommentar makes this an interjection speech
 
             # Combine all paragraphs into a single text
             full_text = "\n\n".join([p["text"] for p in paragraphs])
@@ -554,52 +561,10 @@ class BundestagAPIClient:
                 "paragraphs": paragraphs,
                 "comments": comments,
                 "text": full_text,
+                "is_interjection": is_interjection
             }
 
             speeches.append(speech)
-
-        # Also extract comments from the sitzungsbeginn if available
-        # These are usually the president's opening remarks
-        sitzungsbeginn = sitzungsverlauf.find(".//sitzungsbeginn")
-        if sitzungsbeginn:
-            # Get the president's name
-            president_name = sitzungsbeginn.findtext(".//name", "").strip()
-
-            # Get all paragraphs from the opening
-            paragraphs = []
-            p_elems = sitzungsbeginn.findall(".//p")
-            for p in p_elems:
-                if p.text:
-                    paragraphs.append(
-                        {"text": p.text.strip(), "type": p.get("klasse", "")}
-                    )
-
-            # Combine all paragraphs into a single text
-            full_text = "\n\n".join([p["text"] for p in paragraphs])
-
-            # Create opening speech data
-            if president_name and paragraphs:
-                # Try to determine president's last name
-                name_parts = president_name.split()
-                last_name = name_parts[-1] if name_parts else ""
-
-                opening_speech = {
-                    "id": "sitzungsbeginn",
-                    "speaker_id": "",
-                    "speaker_title": "Präsident/in",
-                    "speaker_first_name": "",
-                    "speaker_last_name": last_name,
-                    "speaker_full_name": president_name,
-                    "party": "",
-                    "page": "",
-                    "page_section": "",
-                    "paragraphs": paragraphs,
-                    "comments": [],
-                    "text": full_text,
-                    "is_president": True,
-                }
-
-                speeches.append(opening_speech)
 
         return speeches
 

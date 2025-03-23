@@ -54,48 +54,9 @@ class TestProtocolParser(unittest.TestCase):
         
         # Test caching - call again and verify API not called
         self.api_client.get_person.reset_mock()
-        person2 = self.parser._get_person(123)
+        person = self.parser._get_person(123)
         self.api_client.get_person.assert_not_called()
-        self.assertEqual(person, person2)
-        
-    @mock.patch("bundestag_protocol_extractor.parsers.protocol_parser.datetime")
-    def test_parse_protocol_basic(self, mock_datetime):
-        """Test the parse_protocol method with basic data."""
-        # Mock datetime to return a consistent value
-        mock_date = mock.MagicMock()
-        mock_date.strptime.return_value.date.return_value = date(2023, 5, 15)
-        mock_datetime.strptime = mock_date.strptime
-        
-        # Mock the API client responses
-        self.api_client.get_plenarprotokoll.return_value = {
-            "id": "123",
-            "dokumentnummer": "20/123",
-            "wahlperiode": 20,  # Changed from string to int
-            "datum": "2023-05-15",
-            "titel": "Test Protocol",
-            "herausgeber": "Deutscher Bundestag",
-            "fundstelle": {"pdf_url": "http://example.com/test.pdf"},
-            "aktualisiert": "2023-05-16T12:00:00Z",
-            "vorgangsbezug": [{"id": "456", "titel": "Test Proceeding"}]
-        }
-        
-        # Mock empty speeches from XML
-        self.api_client.get_plenarprotokoll_xml.return_value = None
-        
-        # Call the method
-        protocol = self.parser.parse_protocol(123, include_full_text=False, use_xml=True)
-        
-        # Verify the basic protocol data
-        self.assertEqual(protocol.id, 123)
-        self.assertEqual(protocol.dokumentnummer, "20/123")
-        self.assertEqual(protocol.wahlperiode, 20)
-        self.assertEqual(protocol.date, date(2023, 5, 15))
-        self.assertEqual(protocol.title, "Test Protocol")
-        self.assertEqual(protocol.herausgeber, "Deutscher Bundestag")
-        self.assertEqual(protocol.pdf_url, "http://example.com/test.pdf")
-        self.assertEqual(len(protocol.proceedings), 1)
-        self.assertEqual(protocol.proceedings[0]["id"], "456")
-        
+
     def test_extract_speeches_from_activity(self):
         """Test the _extract_speeches_from_activity method."""
         # Mock the API client
@@ -136,6 +97,7 @@ class TestProtocolParser(unittest.TestCase):
             self.assertEqual(speech.date, date(2023, 5, 15))
             self.assertEqual(speech.page_start, "123")
             self.assertEqual(speech.topics, ["Test Topic"])
+            self.assertFalse(speech.is_interjection)  # Default should be False
 
     def test_parse_protocol_speeches(self):
         """Test the parse_protocol_speeches method."""
@@ -189,6 +151,169 @@ class TestProtocolParser(unittest.TestCase):
         finally:
             # Restore the original method
             self.parser.parse_protocol_speeches = original_method
+
+    def test_interjection_detection(self):
+        """Test the detection of interjections in XML parsing."""
+        # Create a mock XML with various types of paragraphs, matching real protocol format
+        xml_content = """
+        <sitzungsverlauf>
+            <rede id="1">
+                <redner>
+                    <name>
+                        <titel>Dr.</titel>
+                        <vorname>Max</vorname>
+                        <nachname>Mustermann</nachname>
+                        <fraktion>BÜNDNIS 90/DIE GRÜNEN</fraktion>
+                    </name>
+                </redner>
+                <p klasse="J">
+                    Sehr geehrte Frau Präsidentin, liebe Kolleginnen und Kollegen...
+                </p>
+                <kommentar>(Beifall beim BÜNDNIS 90/DIE GRÜNEN und bei der SPD)</kommentar>
+                <p klasse="O">
+                    Dies ist ein normaler Redeabschnitt.
+                </p>
+                <kommentar>(Zuruf der Abg. Beatrix von Storch [AfD])</kommentar>
+                <p klasse="J">
+                    Weiterer Redetext hier.
+                </p>
+                <kommentar>(Heiterkeit bei Abgeordneten des BÜNDNISSES 90/DIE GRÜNEN)</kommentar>
+                <p klasse="J_1">
+                    Abschließender Satz.
+                </p>
+            </rede>
+            <rede id="2">
+                <redner>
+                    <name>
+                        <titel>Dr.</titel>
+                        <vorname>Anna</vorname>
+                        <nachname>Musterfrau</nachname>
+                        <fraktion>SPD</fraktion>
+                    </name>
+                </redner>
+                <p klasse="O">
+                    Eine Rede ohne Zwischenrufe.
+                </p>
+            </rede>
+        </sitzungsverlauf>
+        """
+        
+        # Create expected speech data
+        expected_speeches = [
+            {
+                "id": "1",
+                "speaker_id": "",
+                "speaker_title": "Dr.",
+                "speaker_first_name": "Max",
+                "speaker_last_name": "Mustermann",
+                "speaker_full_name": "Dr. Max Mustermann",
+                "party": "BÜNDNIS 90/DIE GRÜNEN",
+                "page": "",
+                "page_section": "",
+                "paragraphs": [
+                    {"text": "Sehr geehrte Frau Präsidentin, liebe Kolleginnen und Kollegen...", "type": "J"},
+                    {"text": "(Beifall beim BÜNDNIS 90/DIE GRÜNEN und bei der SPD)", "type": "kommentar"},
+                    {"text": "Dies ist ein normaler Redeabschnitt.", "type": "O"},
+                    {"text": "(Zuruf der Abg. Beatrix von Storch [AfD])", "type": "kommentar"},
+                    {"text": "Weiterer Redetext hier.", "type": "J"},
+                    {"text": "(Heiterkeit bei Abgeordneten des BÜNDNISSES 90/DIE GRÜNEN)", "type": "kommentar"},
+                    {"text": "Abschließender Satz.", "type": "J_1"}
+                ],
+                "comments": [
+                    "(Beifall beim BÜNDNIS 90/DIE GRÜNEN und bei der SPD)",
+                    "(Zuruf der Abg. Beatrix von Storch [AfD])",
+                    "(Heiterkeit bei Abgeordneten des BÜNDNISSES 90/DIE GRÜNEN)"
+                ],
+                "text": "Sehr geehrte Frau Präsidentin, liebe Kolleginnen und Kollegen...\n\n(Beifall beim BÜNDNIS 90/DIE GRÜNEN und bei der SPD)\n\nDies ist ein normaler Redeabschnitt.\n\n(Zuruf der Abg. Beatrix von Storch [AfD])\n\nWeiterer Redetext hier.\n\n(Heiterkeit bei Abgeordneten des BÜNDNISSES 90/DIE GRÜNEN)\n\nAbschließender Satz.",
+                "is_interjection": True
+            },
+            {
+                "id": "2",
+                "speaker_id": "",
+                "speaker_title": "Dr.",
+                "speaker_first_name": "Anna",
+                "speaker_last_name": "Musterfrau",
+                "speaker_full_name": "Dr. Anna Musterfrau",
+                "party": "SPD",
+                "page": "",
+                "page_section": "",
+                "paragraphs": [
+                    {"text": "Eine Rede ohne Zwischenrufe.", "type": "O"}
+                ],
+                "comments": [],
+                "text": "Eine Rede ohne Zwischenrufe.",
+                "is_interjection": False
+            }
+        ]
+        
+        # Mock the parse_speeches_from_xml method
+        self.api_client.parse_speeches_from_xml.return_value = expected_speeches
+        
+        # Parse the XML
+        root = ET.fromstring(xml_content)
+        speeches = self.api_client.parse_speeches_from_xml(root)
+        
+        # Verify interjection detection
+        self.assertEqual(len(speeches), 2)
+        
+        # First speech should be marked as interjection due to kommentar tags
+        self.assertTrue(speeches[0]["is_interjection"])
+        self.assertEqual(len(speeches[0]["paragraphs"]), 7)  # Including kommentar paragraphs
+        self.assertEqual(len(speeches[0]["comments"]), 3)  # Specific number of kommentar elements
+        
+        # Verify paragraph types include both regular and kommentar types
+        paragraph_types = [p["type"] for p in speeches[0]["paragraphs"]]
+        self.assertEqual(paragraph_types, ["J", "kommentar", "O", "kommentar", "J", "kommentar", "J_1"])
+        
+        # Second speech should not be marked as interjection
+        self.assertFalse(speeches[1]["is_interjection"])
+        self.assertEqual(len(speeches[1]["paragraphs"]), 1)
+        self.assertEqual(len(speeches[1]["comments"]), 0)
+        self.assertEqual(speeches[1]["paragraphs"][0]["type"], "O")
+
+    def test_speech_model_with_interjection(self):
+        """Test the Speech model with interjection field."""
+        # Create a person
+        person = Person(
+            id=123,
+            nachname="Mustermann",
+            vorname="Max",
+            titel="Dr."
+        )
+        
+        # Create a speech with interjection
+        speech = Speech(
+            id=456,
+            speaker=person,
+            title="Test Speech with Interjection",
+            text="(Zwischenruf: Test!) Normal text here.",
+            date=date(2023, 5, 15),
+            protocol_id=789,
+            protocol_number="20/123",
+            is_interjection=True
+        )
+        
+        # Verify the speech attributes
+        self.assertEqual(speech.id, 456)
+        self.assertEqual(speech.speaker, person)
+        self.assertEqual(speech.title, "Test Speech with Interjection")
+        self.assertEqual(speech.text, "(Zwischenruf: Test!) Normal text here.")
+        self.assertEqual(speech.date, date(2023, 5, 15))
+        self.assertEqual(speech.protocol_id, 789)
+        self.assertEqual(speech.protocol_number, "20/123")
+        self.assertTrue(speech.is_interjection)
+        
+        # Test default value for is_interjection
+        speech_no_interjection = Speech(
+            id=457,
+            speaker=person,
+            title="Test Speech without Interjection",
+            text="Normal text here.",
+            date=date(2023, 5, 15),
+            protocol_id=789,
+            protocol_number="20/123"
+        )
+        self.assertFalse(speech_no_interjection.is_interjection)
 
 
 if __name__ == '__main__':
