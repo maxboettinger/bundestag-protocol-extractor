@@ -1,7 +1,6 @@
 """Tests for the extraction strategies."""
 
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List
 
 import pytest
 from pytest.mock import MagicMock
@@ -9,7 +8,6 @@ from pytest.mock import MagicMock
 from bundestag_protocol_extractor.api.client import BundestagAPIClient
 from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech
 from bundestag_protocol_extractor.parsers.extraction_strategies import (
-    ExtractionStrategy,
     ExtractionStrategyFactory,
     PageExtractionStrategy,
     PatternExtractionStrategy,

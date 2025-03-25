@@ -5,8 +5,6 @@ This helps detect packaging issues where some modules might be missing.
 
 import importlib
 import os
-import pkgutil
-import sys
 from pathlib import Path
 
 

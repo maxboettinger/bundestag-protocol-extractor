@@ -1,9 +1,5 @@
 """Tests for the pandas_helper module."""
 
-from pathlib import Path
-
-import numpy as np
-import pandas as pd
 import pytest
 
 from bundestag_protocol_extractor.utils.pandas_helper import BundestagDataFrames

@@ -38,6 +38,7 @@ dev = [
     "mypy>=1.0.0",
     "flake8>=6.0.0",
     "pre-commit>=3.0.0",
+    "matplotlib>=3.5.0",
 ]
 docs = [
     "sphinx>=6.0.0",

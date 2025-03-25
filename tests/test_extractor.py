@@ -1,14 +1,12 @@
 """Tests for the main BundestagExtractor class."""
 
-import os
 from datetime import date
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from bundestag_protocol_extractor import BundestagExtractor
-from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech
+from bundestag_protocol_extractor.models.schema import PlenarProtocol
 
 
 @pytest.fixture

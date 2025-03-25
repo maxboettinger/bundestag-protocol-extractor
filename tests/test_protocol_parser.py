@@ -2,7 +2,7 @@
 
 import unittest
 import xml.etree.ElementTree as ET
-from datetime import date, datetime
+from datetime import date
 from unittest import mock
 
 from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech

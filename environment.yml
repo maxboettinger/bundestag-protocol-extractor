@@ -11,6 +11,7 @@ dependencies:
   - beautifulsoup4>=4.11.0
   - lxml>=4.9.0
   - tqdm>=4.64.0
+  - matplotlib>=3.5.0  # Added for data visualization and testing
   # Development dependencies
   - pytest>=7.0.0
   - pytest-cov>=4.0.0
