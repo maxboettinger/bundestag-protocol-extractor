@@ -38,6 +38,7 @@ class Speech:
     topics: List[str] = field(default_factory=list)
     related_proceedings: List[Dict[str, Any]] = field(default_factory=list)
     is_interjection: bool = False  # Whether this speech is an interjection (Zwischenruf)
+    is_presidential_announcement: bool = False  # Whether this speech is a presidential announcement of the next speaker
 
 
 @dataclass

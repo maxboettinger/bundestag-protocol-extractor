@@ -518,6 +518,7 @@ class BundestagAPIClient:
             paragraphs = []
             comments = []
             is_interjection = False
+            is_presidential_announcement = False
             
             # Process all child elements in order
             for elem in rede:
@@ -543,6 +544,23 @@ class BundestagAPIClient:
                         comments.append(comment_text)
                         paragraphs.append({"text": comment_text, "type": "kommentar"})
                         is_interjection = True  # Any kommentar makes this an interjection speech
+                elif elem.tag == "name":
+                    # Check for presidential name
+                    name_text = elem.text.strip() if elem.text else ""
+                    if any(title in name_text for title in ["Präsident", "Präsidentin"]):
+                        # Look for announcement pattern in subsequent paragraphs
+                        announcement_patterns = [
+                            "Als Nächste hat das Wort",
+                            "Als Nächster hat das Wort",
+                            "Als Nächste hat das Wort zur Geschäftsordnung",
+                            "Als Nächster hat das Wort zur Geschäftsordnung"
+                        ]
+                        # Check the next paragraph for the announcement pattern
+                        next_p = rede.find(".//p", after=elem)
+                        if next_p is not None and next_p.text:
+                            next_text = next_p.text.strip()
+                            if any(pattern in next_text for pattern in announcement_patterns):
+                                is_presidential_announcement = True
 
             # Combine all paragraphs into a single text
             full_text = "\n\n".join([p["text"] for p in paragraphs])
@@ -561,7 +579,8 @@ class BundestagAPIClient:
                 "paragraphs": paragraphs,
                 "comments": comments,
                 "text": full_text,
-                "is_interjection": is_interjection
+                "is_interjection": is_interjection,
+                "is_presidential_announcement": is_presidential_announcement
             }
 
             speeches.append(speech)

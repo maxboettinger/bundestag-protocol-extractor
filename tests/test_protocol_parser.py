@@ -271,8 +271,113 @@ class TestProtocolParser(unittest.TestCase):
         self.assertEqual(len(speeches[1]["comments"]), 0)
         self.assertEqual(speeches[1]["paragraphs"][0]["type"], "O")
 
-    def test_speech_model_with_interjection(self):
-        """Test the Speech model with interjection field."""
+    def test_presidential_announcement_detection(self):
+        """Test the detection of presidential announcements in XML parsing."""
+        # Create a mock XML with a presidential announcement
+        xml_content = """
+        <sitzungsverlauf>
+            <rede id="1">
+                <redner>
+                    <name>
+                        <titel>Dr.</titel>
+                        <vorname>Max</vorname>
+                        <nachname>Mustermann</nachname>
+                        <fraktion>BÜNDNIS 90/DIE GRÜNEN</fraktion>
+                    </name>
+                </redner>
+                <p klasse="J">
+                    Eine normale Rede.
+                </p>
+                <name>Präsidentin Bärbel Bas:</name>
+                <p klasse="J_1">
+                    Als Nächste hat das Wort zur Geschäftsordnung für die Gruppe BSW Jessica Tatti.
+                </p>
+                <kommentar>(Beifall beim BSW)</kommentar>
+            </rede>
+            <rede id="2">
+                <redner>
+                    <name>
+                        <titel>Dr.</titel>
+                        <vorname>Anna</vorname>
+                        <nachname>Musterfrau</nachname>
+                        <fraktion>SPD</fraktion>
+                    </name>
+                </redner>
+                <p klasse="O">
+                    Eine Rede ohne Präsidentenankündigung.
+                </p>
+            </rede>
+        </sitzungsverlauf>
+        """
+        
+        # Create expected speech data
+        expected_speeches = [
+            {
+                "id": "1",
+                "speaker_id": "",
+                "speaker_title": "Dr.",
+                "speaker_first_name": "Max",
+                "speaker_last_name": "Mustermann",
+                "speaker_full_name": "Dr. Max Mustermann",
+                "party": "BÜNDNIS 90/DIE GRÜNEN",
+                "page": "",
+                "page_section": "",
+                "paragraphs": [
+                    {"text": "Eine normale Rede.", "type": "J"},
+                    {"text": "Als Nächste hat das Wort zur Geschäftsordnung für die Gruppe BSW Jessica Tatti.", "type": "J_1"}
+                ],
+                "comments": ["(Beifall beim BSW)"],
+                "text": "Eine normale Rede.\n\nAls Nächste hat das Wort zur Geschäftsordnung für die Gruppe BSW Jessica Tatti.",
+                "is_interjection": False,
+                "is_presidential_announcement": True
+            },
+            {
+                "id": "2",
+                "speaker_id": "",
+                "speaker_title": "Dr.",
+                "speaker_first_name": "Anna",
+                "speaker_last_name": "Musterfrau",
+                "speaker_full_name": "Dr. Anna Musterfrau",
+                "party": "SPD",
+                "page": "",
+                "page_section": "",
+                "paragraphs": [
+                    {"text": "Eine Rede ohne Präsidentenankündigung.", "type": "O"}
+                ],
+                "comments": [],
+                "text": "Eine Rede ohne Präsidentenankündigung.",
+                "is_interjection": False,
+                "is_presidential_announcement": False
+            }
+        ]
+        
+        # Mock the parse_speeches_from_xml method
+        self.api_client.parse_speeches_from_xml.return_value = expected_speeches
+        
+        # Parse the XML
+        root = ET.fromstring(xml_content)
+        speeches = self.api_client.parse_speeches_from_xml(root)
+        
+        # Verify presidential announcement detection
+        self.assertEqual(len(speeches), 2)
+        
+        # First speech should be marked as presidential announcement
+        self.assertTrue(speeches[0]["is_presidential_announcement"])
+        self.assertEqual(len(speeches[0]["paragraphs"]), 2)
+        self.assertEqual(len(speeches[0]["comments"]), 1)
+        
+        # Verify paragraph types
+        paragraph_types = [p["type"] for p in speeches[0]["paragraphs"]]
+        self.assertEqual(paragraph_types, ["J", "J_1"])
+        
+        # Second speech should not be marked as presidential announcement
+        self.assertFalse(speeches[1]["is_presidential_announcement"])
+        self.assertEqual(len(speeches[1]["paragraphs"]), 1)
+        self.assertEqual(len(speeches[1]["comments"]), 0)
+        self.assertEqual(speeches[1]["paragraphs"][0]["type"], "O")
+
+    def test_speech_model_with_presidential_announcement(self):
+        """Test the Speech model with presidential announcement field."""
         # Create a person
         person = Person(
             id=123,
@@ -281,39 +386,39 @@ class TestProtocolParser(unittest.TestCase):
             titel="Dr."
         )
         
-        # Create a speech with interjection
+        # Create a speech with presidential announcement
         speech = Speech(
             id=456,
             speaker=person,
-            title="Test Speech with Interjection",
-            text="(Zwischenruf: Test!) Normal text here.",
+            title="Test Speech with Presidential Announcement",
+            text="Als Nächste hat das Wort zur Geschäftsordnung für die Gruppe BSW Jessica Tatti.",
             date=date(2023, 5, 15),
             protocol_id=789,
             protocol_number="20/123",
-            is_interjection=True
+            is_presidential_announcement=True
         )
         
         # Verify the speech attributes
         self.assertEqual(speech.id, 456)
         self.assertEqual(speech.speaker, person)
-        self.assertEqual(speech.title, "Test Speech with Interjection")
-        self.assertEqual(speech.text, "(Zwischenruf: Test!) Normal text here.")
+        self.assertEqual(speech.title, "Test Speech with Presidential Announcement")
+        self.assertEqual(speech.text, "Als Nächste hat das Wort zur Geschäftsordnung für die Gruppe BSW Jessica Tatti.")
         self.assertEqual(speech.date, date(2023, 5, 15))
         self.assertEqual(speech.protocol_id, 789)
         self.assertEqual(speech.protocol_number, "20/123")
-        self.assertTrue(speech.is_interjection)
+        self.assertTrue(speech.is_presidential_announcement)
         
-        # Test default value for is_interjection
-        speech_no_interjection = Speech(
+        # Test default value for is_presidential_announcement
+        speech_no_announcement = Speech(
             id=457,
             speaker=person,
-            title="Test Speech without Interjection",
+            title="Test Speech without Presidential Announcement",
             text="Normal text here.",
             date=date(2023, 5, 15),
             protocol_id=789,
             protocol_number="20/123"
         )
-        self.assertFalse(speech_no_interjection.is_interjection)
+        self.assertFalse(speech_no_announcement.is_presidential_announcement)
 
 
 if __name__ == '__main__':
