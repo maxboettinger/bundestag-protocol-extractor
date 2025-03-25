@@ -3,7 +3,7 @@
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +15,7 @@ from bundestag_protocol_extractor.parsers.extraction_strategies import (
     PatternExtractionStrategy,
     XMLExtractionStrategy,
 )
+from bundestag_protocol_extractor.parsers.protocol_parser import ProtocolParser
 
 
 @pytest.fixture
@@ -355,6 +356,115 @@ def test_parse_speeches_from_real_xml():
     
     # Log the number of speeches found
     print(f"Found {len(speeches)} speeches, {len(presidential_speeches)} presidential announcements")
+
+
+def test_extraction_confidence_check():
+    """Test that extraction process properly handles speeches with low confidence or pending status."""
+    # Create a mock API client
+    api_client = MagicMock(spec=BundestagAPIClient)
+    
+    # Create a protocol parser
+    parser = ProtocolParser(api_client)
+    
+    # Create a test person
+    person = Person(
+        id=9876, nachname="Mustermann", vorname="Max", titel="Dr.", fraktion="CDU/CSU"
+    )
+    
+    # Create a protocol with pending speeches
+    protocol = PlenarProtocol(
+        id=12345,
+        dokumentnummer="20/123",
+        wahlperiode=20,
+        date="2023-01-01",
+        title="Test Protocol",
+        herausgeber="Deutscher Bundestag",
+        full_text="This is a test protocol with some text. Max Mustermann (CDU/CSU): This is the extracted speech.",
+    )
+    
+    # Create some speeches with pending extraction status
+    pending_speech = Speech(
+        id=1000,
+        speaker=person,
+        title="Test Speech",
+        text="[EXTRACTION_PENDING] Speech by Dr. Max Mustermann",
+        date="2023-01-01",
+        protocol_id=12345,
+        protocol_number="20/123",
+        page_start="123",
+        extraction_method="none",
+        extraction_status="pending",
+        extraction_confidence=0.0,
+    )
+    
+    # Add speeches to protocol
+    protocol.speeches = [pending_speech]
+    
+    # Mock the different extraction strategies
+    xml_strategy = MagicMock()
+    xml_strategy.name = "xml"
+    xml_strategy.can_extract.return_value = True
+    # Simulate XML extraction failure - return speech with same ID but still marked as pending
+    xml_strategy.extract.return_value = [
+        Speech(
+            id=1000,
+            speaker=person,
+            title="Test Speech",
+            text="[EXTRACTION_FAILED:XML] Speech by Dr. Max Mustermann",
+            date="2023-01-01",
+            protocol_id=12345,
+            protocol_number="20/123",
+            page_start="123",
+            extraction_method="xml",
+            extraction_status="failed",
+            extraction_confidence=0.0,
+        )
+    ]
+    
+    pattern_strategy = MagicMock()
+    pattern_strategy.name = "pattern"
+    pattern_strategy.can_extract.return_value = True
+    # Simulate pattern extraction success
+    pattern_strategy.extract.return_value = [
+        Speech(
+            id=1000,
+            speaker=person,
+            title="Test Speech",
+            text="This is the extracted speech.",
+            date="2023-01-01",
+            protocol_id=12345,
+            protocol_number="20/123",
+            page_start="123",
+            extraction_method="pattern",
+            extraction_status="complete",
+            extraction_confidence=0.7,
+        )
+    ]
+    
+    # Mock the ExtractionStrategyFactory
+    factory = MagicMock()
+    factory.create_tiered_strategy_list.return_value = [xml_strategy, pattern_strategy]
+    
+    # Patch the factory import in parse_protocol_speeches
+    with patch(
+        "bundestag_protocol_extractor.parsers.extraction_strategies.factory.ExtractionStrategyFactory",
+        return_value=factory
+    ):
+        # Call the method under test
+        result_speeches = parser.parse_protocol_speeches(protocol)
+        
+        # Verify the results
+        assert len(result_speeches) == 1
+        assert result_speeches[0].extraction_method == "pattern"
+        assert result_speeches[0].extraction_status == "complete"
+        assert result_speeches[0].extraction_confidence == 0.7
+        assert "This is the extracted speech." in result_speeches[0].text
+        
+        # Verify the extraction strategies were called in the right order
+        xml_strategy.can_extract.assert_called_once()
+        xml_strategy.extract.assert_called_once()
+        pattern_strategy.can_extract.assert_called_once()
+        pattern_strategy.extract.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -474,6 +474,8 @@ class ProtocolParser:
             if protocol.full_text and any(
                 not speech.text
                 or speech.text.startswith("Speech text would be extracted")
+                or speech.text.startswith("[EXTRACTION_PENDING]")
+                or speech.extraction_status == "pending"
                 for speech in protocol.speeches
             ):
                 logger.debug("Extracting speech texts from full protocol text")
