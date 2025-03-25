@@ -5,14 +5,13 @@ This module provides a client for interacting with the German Bundestag's DIP AP
 handling authentication, rate limiting, XML retrieval, and data extraction.
 """
 
-import logging
 import os
 import re
 import time
 import xml.etree.ElementTree as ET
 from hashlib import md5
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urljoin
 
 import requests
