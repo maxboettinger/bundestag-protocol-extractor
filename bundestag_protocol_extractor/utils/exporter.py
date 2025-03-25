@@ -75,7 +75,16 @@ class Exporter:
             "speaker_function": speech.speaker.funktion,
             "speaker_ministry": speech.speaker.ressort,
             "speaker_state": speech.speaker.bundesland,
-            "is_interjection": speech.is_interjection
+            "is_interjection": speech.is_interjection,
+            "is_presidential_announcement": speech.is_presidential_announcement,
+            # Extraction metadata fields
+            "extraction_method": speech.extraction_method,
+            "extraction_status": speech.extraction_status,
+            "extraction_confidence": speech.extraction_confidence,
+            # Derived boolean fields for easier filtering in pandas
+            "is_xml_extracted": speech.extraction_method == "xml",
+            "is_complete": speech.extraction_status == "complete",
+            "is_high_confidence": speech.extraction_confidence >= 0.8
         }
 
         return speech_dict
@@ -396,10 +405,69 @@ class Exporter:
         )
         saved_files["readme"] = readme_path
 
+        # Generate enhanced data quality report and visualizations
+        from bundestag_protocol_extractor.utils.data_quality import DataQualityReporter
+        
+        # Create quality reporter
+        quality_reporter = DataQualityReporter(output_dir=self.output_dir)
+        
+        # Generate quality report
+        data_quality_report = self._generate_data_quality_report(df_speeches)
+        
+        # Save the report as JSON
+        data_quality_path = quality_reporter.save_quality_report(
+            data_quality_report, 
+            f"{base_filename}_extraction_report"
+        )
+        saved_files["extraction_report"] = data_quality_path
+        
+        # Generate visualizations
+        try:
+            logger.info("Generating data quality visualizations")
+            visualization_paths = quality_reporter.generate_quality_visualizations(
+                df_speeches=df_speeches,
+                base_filename=base_filename,
+                save_plots=True
+            )
+            
+            # Add visualization paths to saved files
+            for key, path in visualization_paths.items():
+                if isinstance(path, Path):
+                    saved_files[f"visualization_{key}"] = path
+            
+            # Create HTML report combining everything
+            html_path = quality_reporter.create_html_report(
+                report=data_quality_report,
+                visualizations=visualization_paths,
+                filename=f"{base_filename}_quality_report.html"
+            )
+            saved_files["quality_html_report"] = html_path
+            logger.debug(f"Generated quality HTML report at {html_path}")
+        except Exception as e:
+            logger.warning(f"Error generating visualizations: {e}")
+        
         logger.info(
             f"CSV export complete: {len(saved_files)} files saved to {self.output_dir}"
         )
         return saved_files
+    
+    def _generate_data_quality_report(self, df_speeches: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Generate a comprehensive report on speech extraction quality.
+        
+        Args:
+            df_speeches: DataFrame containing speech data
+            
+        Returns:
+            Dictionary with extraction quality metrics
+        """
+        from bundestag_protocol_extractor.utils.data_quality import DataQualityReporter
+        
+        # Use the dedicated quality reporter for enhanced reporting
+        reporter = DataQualityReporter(output_dir=self.output_dir)
+        
+        # Generate the quality report
+        return reporter.generate_quality_report(df_speeches)
 
     def _create_readme(
         self,
@@ -453,6 +521,32 @@ This export contains the following CSV files:
 - Each protocol has a table of contents (protocol_id in toc.csv)
 - Each protocol has agenda items (protocol_id in agenda_items.csv)
 
+## Extraction Quality Indicators
+Each speech in the `speeches.csv` file includes indicators of extraction quality:
+
+1. **extraction_method**: How the speech text was obtained
+   - "xml": Extracted from structured XML (highest quality)
+   - "pattern": Extracted using pattern matching
+   - "page": Extracted using basic page-based location
+   - "none": No extraction possible
+
+2. **extraction_status**: Completion status of the extraction
+   - "complete": Full speech text was extracted
+   - "partial": Only part of the speech was extracted
+   - "failed": Extraction failed
+   - "pending": Extraction not attempted
+
+3. **extraction_confidence**: Confidence score (0.0-1.0) indicating reliability
+   - 0.8-1.0: High confidence (XML extraction)
+   - 0.5-0.8: Medium confidence (pattern-based extraction)
+   - 0.2-0.5: Low confidence (page-based extraction)
+   - 0.0-0.2: Very low confidence (failed extraction)
+
+4. **Helper Boolean Fields**: For easier filtering in pandas
+   - is_xml_extracted: True for XML-extracted speeches
+   - is_complete: True for completely extracted speeches
+   - is_high_confidence: True for speeches with confidence >= 0.8
+
 ## Research Applications
 This dataset can be used for:
 - Quantitative text analysis (word frequency, sentiment, etc.)
@@ -461,6 +555,28 @@ This dataset can be used for:
 - Interaction analysis (comments and interjections)
 - Historical analysis across different legislative periods
 - Parliamentary behavior and rhetoric studies
+
+## Filtering Tips for Researchers
+When working with this data, you may want to filter speeches based on extraction quality:
+
+```python
+import pandas as pd
+
+# Load the speeches data
+df = pd.read_csv("{base_filename}_speeches.csv")
+
+# Get only high-quality speeches (XML extracted)
+xml_speeches = df[df['extraction_method'] == 'xml']
+
+# Get only complete extractions with any method
+complete_speeches = df[df['extraction_status'] == 'complete']
+
+# Get only high-confidence speeches
+high_confidence = df[df['extraction_confidence'] >= 0.8]
+
+# Quick filtering using the boolean helper columns
+high_quality = df[df['is_xml_extracted'] & df['is_complete']]
+```
 
 ## Notes
 - {'Full speech texts are included' if include_speech_text else 'Full speech texts are excluded to reduce file size'}

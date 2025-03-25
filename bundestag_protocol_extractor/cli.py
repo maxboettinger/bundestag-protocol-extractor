@@ -48,11 +48,18 @@ def main():
         parser.add_argument("--retry", type=int, default=3,
                             help="Number of times to retry a request when rate limited (default: 3)")
                             
-        # XML options
-        parser.add_argument("--use-xml", action="store_true", default=True,
-                            help="Use XML parsing for speeches (more accurate, default: True)")
-        parser.add_argument("--no-xml", dest="use_xml", action="store_false",
-                            help="Disable XML parsing for speeches")
+        # XML processing options
+        xml_group = parser.add_argument_group("XML Processing Options")
+        xml_group.add_argument("--enable-xml-cache", action="store_true", default=True,
+                            help="Enable caching of XML files (default: True)")
+        xml_group.add_argument("--disable-xml-cache", dest="enable_xml_cache", action="store_false",
+                            help="Disable caching of XML files")
+        xml_group.add_argument("--cache-dir", 
+                            help="Directory for XML cache (default: output_dir/cache/xml)")
+        xml_group.add_argument("--repair-xml", action="store_true", default=True,
+                            help="Attempt to repair malformed XML (default: True)")
+        xml_group.add_argument("--no-repair-xml", dest="repair_xml", action="store_false",
+                            help="Do not attempt to repair malformed XML")
                             
         # Export options
         parser.add_argument("--format", choices=["csv", "json", "both"], default="csv", 
@@ -148,13 +155,16 @@ def main():
         # Use the provided API key or the default public key
         api_key = args.api_key
         
-        # Initialize extractor with retry parameters
+        # Initialize extractor with retry parameters and XML options
         extractor = BundestagExtractor(
             api_key, 
             args.output_dir,
             max_retries=args.retry,
             retry_delay=args.delay,
-            resume_from=args.resume
+            resume_from=args.resume,
+            cache_dir=args.cache_dir,
+            enable_xml_cache=args.enable_xml_cache,
+            repair_xml=args.repair_xml
         )
         
         # Get protocols
@@ -168,8 +178,7 @@ def main():
                 limit=args.limit,
                 offset=args.offset,
                 index=args.index,
-                resume_from_doc=args.resume_from,
-                use_xml=args.use_xml
+                resume_from_doc=args.resume_from
             )
             
             if not protocols:

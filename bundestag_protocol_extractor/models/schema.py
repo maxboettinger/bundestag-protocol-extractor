@@ -39,6 +39,11 @@ class Speech:
     related_proceedings: List[Dict[str, Any]] = field(default_factory=list)
     is_interjection: bool = False  # Whether this speech is an interjection (Zwischenruf)
     is_presidential_announcement: bool = False  # Whether this speech is a presidential announcement of the next speaker
+    
+    # Extraction metadata fields
+    extraction_method: str = "unknown"  # "xml", "pattern", "page", "none"
+    extraction_status: str = "unknown"  # "complete", "partial", "failed"
+    extraction_confidence: float = 0.0  # 0.0-1.0 confidence score
 
 
 @dataclass

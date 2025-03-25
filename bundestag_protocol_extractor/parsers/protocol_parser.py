@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 class ProtocolParser:
     """Parser for Bundestag plenarprotokolle."""
     
-    def __init__(self, api_client: BundestagAPIClient, max_retries: int = 3, retry_delay: float = 1.0):
+    def __init__(self, api_client: BundestagAPIClient, max_retries: int = 3, retry_delay: float = 1.0, repair_xml: bool = True):
         """
         Initialize the parser.
         
@@ -27,11 +27,13 @@ class ProtocolParser:
             api_client: API client instance
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
+            repair_xml: Whether to attempt repairing malformed XML
         """
         self.api_client = api_client
         self.persons_cache: Dict[int, Person] = {}
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.repair_xml = repair_xml
     
     def _parse_date(self, date_str: str) -> datetime.date:
         """
@@ -181,9 +183,8 @@ class ProtocolParser:
             # Get topics from deskriptors
             topics = [d["name"] for d in activity.get("deskriptor", [])]
             
-            # For the actual speech text, we would need to parse the full protocol text
-            # Here we'll just set a placeholder
-            speech_text = f"Speech text would be extracted from the full protocol text based on page {page_start}"
+            # Create a standardized placeholder with extraction information
+            speech_text = f"[EXTRACTION_PENDING] Speech by {speaker.titel} {speaker.vorname} {speaker.nachname} referenced at page {page_start}"
             
             speech = Speech(
                 id=speech_id,
@@ -196,7 +197,11 @@ class ProtocolParser:
                 page_start=page_start,
                 page_end=page_end,
                 topics=topics,
-                related_proceedings=related_proceedings
+                related_proceedings=related_proceedings,
+                # Set extraction metadata fields to indicate pending extraction
+                extraction_method="none",
+                extraction_status="pending",
+                extraction_confidence=0.0
             )
             
             speeches.append(speech)
@@ -207,8 +212,7 @@ class ProtocolParser:
     def parse_protocol(
         self, 
         protocol_id: int, 
-        include_full_text: bool = True, 
-        use_xml: bool = True,
+        include_full_text: bool = True,
         progress_tracker: Optional[Any] = None
     ) -> PlenarProtocol:
         """
@@ -217,7 +221,6 @@ class ProtocolParser:
         Args:
             protocol_id: Plenarprotokoll ID
             include_full_text: Whether to include the full text
-            use_xml: Whether to try parsing speeches from XML format (more accurate)
             progress_tracker: Optional progress tracker to update parsing progress
             
         Returns:
@@ -251,127 +254,130 @@ class ProtocolParser:
             doc_identifier = protocol.dokumentnummer
             logger.info(f"Processing protocol {doc_identifier} from {protocol.date}")
             
-            # Get XML data if requested (preferred method)
+            # Always try to get XML data (preferred method)
             speeches_from_xml = []
             xml_root = None
             
-            if use_xml:
-                logger.info(f"Attempting to get XML data for protocol {doc_identifier}")
-                try:
-                    # Try to get structured XML data
-                    xml_root = self.api_client.get_plenarprotokoll_xml(
-                        protocol_data,
-                        progress_tracker=progress_tracker
-                    )
+            logger.info(f"Attempting to get XML data for protocol {doc_identifier}")
+            try:
+                # Try to get structured XML data
+                xml_root = self.api_client.get_plenarprotokoll_xml(
+                    protocol_data,
+                    progress_tracker=progress_tracker,
+                    max_retries=self.max_retries,
+                    repair_xml=self.repair_xml
+                )
+                
+                if xml_root is not None:
+                    logger.info(f"Successfully retrieved XML for protocol {doc_identifier}")
                     
-                    if xml_root is not None:
-                        logger.info(f"Successfully retrieved XML for protocol {doc_identifier}")
+                    # Extract full text from XML if available
+                    text_element = xml_root.find("text")
+                    if text_element is not None and text_element.text:
+                        protocol.full_text = text_element.text
+                        logger.debug("Extracted full text from XML")
+                    
+                    # Extract metadata from XML
+                    try:
+                        metadata = self.api_client.extract_metadata_from_xml(xml_root)
                         
-                        # Extract full text from XML if available
-                        text_element = xml_root.find("text")
-                        if text_element is not None and text_element.text:
-                            protocol.full_text = text_element.text
-                            logger.debug("Extracted full text from XML")
-                        
-                        # Extract metadata from XML
+                        # Add metadata to protocol
+                        protocol.toc = metadata.get("table_of_contents", [])
+                        protocol.agenda_items = metadata.get("agenda_items", [])
+                        logger.debug(f"Extracted metadata: {len(protocol.toc)} TOC items, "
+                                     f"{len(protocol.agenda_items)} agenda items")
+                    except Exception as e:
+                        logger.warning(f"Error extracting metadata from XML: {e}")
+                    
+                    # Extract speeches from XML
+                    try:
+                        speeches_from_xml = self.api_client.parse_speeches_from_xml(xml_root)
+                        logger.info(f"Extracted {len(speeches_from_xml)} speeches from XML")
+                    except Exception as e:
+                        logger.warning(f"Error parsing speeches from XML: {e}")
+                        speeches_from_xml = []
+                    
+                    # Convert raw speech data to Speech objects
+                    for speech_data in speeches_from_xml:
                         try:
-                            metadata = self.api_client.extract_metadata_from_xml(xml_root)
+                            # Create a person object from the speech data
+                            party = speech_data.get("party", "")
                             
-                            # Add metadata to protocol
-                            protocol.toc = metadata.get("table_of_contents", [])
-                            protocol.agenda_items = metadata.get("agenda_items", [])
-                            logger.debug(f"Extracted metadata: {len(protocol.toc)} TOC items, "
-                                         f"{len(protocol.agenda_items)} agenda items")
-                        except Exception as e:
-                            logger.warning(f"Error extracting metadata from XML: {e}")
-                        
-                        # Extract speeches from XML
-                        try:
-                            speeches_from_xml = self.api_client.parse_speeches_from_xml(xml_root)
-                            logger.info(f"Extracted {len(speeches_from_xml)} speeches from XML")
-                        except Exception as e:
-                            logger.warning(f"Error parsing speeches from XML: {e}")
-                            speeches_from_xml = []
-                        
-                        # Convert raw speech data to Speech objects
-                        for speech_data in speeches_from_xml:
+                            # Try to use speaker_id as numeric ID or generate a unique negative ID
                             try:
-                                # Create a person object from the speech data
-                                party = speech_data.get("party", "")
-                                
-                                # Try to use speaker_id as numeric ID or generate a unique negative ID
-                                try:
-                                    speaker_id_str = speech_data.get("speaker_id", "")
-                                    if speaker_id_str:
-                                        speaker_id = int(speaker_id_str.replace("r", ""))
-                                    else:
-                                        speaker_id = -len(self.persons_cache) - 1  # Generate a unique negative ID
-                                except (ValueError, TypeError):
+                                speaker_id_str = speech_data.get("speaker_id", "")
+                                if speaker_id_str:
+                                    speaker_id = int(speaker_id_str.replace("r", ""))
+                                else:
                                     speaker_id = -len(self.persons_cache) - 1  # Generate a unique negative ID
-                                
-                                person = Person(
-                                    id=speaker_id,
-                                    nachname=speech_data.get("speaker_last_name", ""),
-                                    vorname=speech_data.get("speaker_first_name", ""),
-                                    titel=speech_data.get("speaker_title", ""),
-                                    fraktion=party
-                                )
-                                
-                                # Generate a unique ID for the speech
-                                try:
-                                    speech_id_str = speech_data.get("id", "")
-                                    if speech_id_str:
-                                        speech_id = int(speech_id_str.replace("ID", ""))
-                                    else:
-                                        speech_id = -len(protocol.speeches) - 1  # Generate a unique negative ID
-                                except (ValueError, TypeError):
+                            except (ValueError, TypeError):
+                                speaker_id = -len(self.persons_cache) - 1  # Generate a unique negative ID
+                            
+                            person = Person(
+                                id=speaker_id,
+                                nachname=speech_data.get("speaker_last_name", ""),
+                                vorname=speech_data.get("speaker_first_name", ""),
+                                titel=speech_data.get("speaker_title", ""),
+                                fraktion=party
+                            )
+                            
+                            # Generate a unique ID for the speech
+                            try:
+                                speech_id_str = speech_data.get("id", "")
+                                if speech_id_str:
+                                    speech_id = int(speech_id_str.replace("ID", ""))
+                                else:
                                     speech_id = -len(protocol.speeches) - 1  # Generate a unique negative ID
-                                
-                                # Extract comments and paragraphs
-                                comments = speech_data.get("comments", [])
-                                paragraphs = speech_data.get("paragraphs", [])
-                                
-                                # Add to topics if there are comments (often contain topic information)
-                                topics = []
-                                for comment in comments:
-                                    # Some comments include information about topics
-                                    if "betr.:" in comment.lower() or "betreffend:" in comment.lower():
-                                        topics.append(comment)
-                                
-                                # Create speech object with rich metadata
-                                speech = Speech(
-                                    id=speech_id,
-                                    speaker=person,
-                                    title=speech_data.get("speaker_full_name", ""),
-                                    text=speech_data.get("text", ""),
-                                    date=protocol.date,
-                                    protocol_id=protocol.id,
-                                    protocol_number=protocol.dokumentnummer,
-                                    page_start=speech_data.get("page", ""),
-                                    page_end=None,  # We don't have an end page in the XML
-                                    topics=topics
-                                )
-                                
-                                # Add extra metadata not in the standard model
-                                speech.paragraphs = paragraphs
-                                speech.comments = comments
-                                speech.is_president = speech_data.get("is_president", False)
-                                speech.page_section = speech_data.get("page_section", "")
-                                
-                                protocol.speeches.append(speech)
-                            except Exception as e:
-                                logger.warning(f"Error processing speech data: {e}")
-                    else:
-                        logger.warning(f"Could not retrieve XML for protocol {doc_identifier}")
-                except Exception as e:
-                    logger.warning(f"Error parsing XML for protocol {doc_identifier}: {e}")
-                    # Fallback to regular method
-                    pass
+                            except (ValueError, TypeError):
+                                speech_id = -len(protocol.speeches) - 1  # Generate a unique negative ID
+                            
+                            # Extract comments and paragraphs
+                            comments = speech_data.get("comments", [])
+                            paragraphs = speech_data.get("paragraphs", [])
+                            
+                            # Add to topics if there are comments (often contain topic information)
+                            topics = []
+                            for comment in comments:
+                                # Some comments include information about topics
+                                if "betr.:" in comment.lower() or "betreffend:" in comment.lower():
+                                    topics.append(comment)
+                            
+                            # Create speech object with rich metadata
+                            speech = Speech(
+                                id=speech_id,
+                                speaker=person,
+                                title=speech_data.get("speaker_full_name", ""),
+                                text=speech_data.get("text", ""),
+                                date=protocol.date,
+                                protocol_id=protocol.id,
+                                protocol_number=protocol.dokumentnummer,
+                                page_start=speech_data.get("page", ""),
+                                page_end=None,  # We don't have an end page in the XML
+                                topics=topics,
+                                # Set extraction metadata fields for XML-based extraction
+                                extraction_method="xml",
+                                extraction_status="complete",
+                                extraction_confidence=1.0  # High confidence for XML extraction
+                            )
+                            
+                            # Add extra metadata not in the standard model
+                            speech.paragraphs = paragraphs
+                            speech.comments = comments
+                            speech.is_president = speech_data.get("is_president", False)
+                            speech.page_section = speech_data.get("page_section", "")
+                            
+                            protocol.speeches.append(speech)
+                        except Exception as e:
+                            logger.warning(f"Error processing speech data: {e}")
+                else:
+                    logger.warning(f"Could not retrieve XML for protocol {doc_identifier}")
+            except Exception as e:
+                logger.warning(f"Error parsing XML for protocol {doc_identifier}: {e}")
+                # Fallback to regular method
             
-            # If we couldn't get speeches from XML or it was not requested,
-            # fall back to the regular method
-            if not protocol.speeches or not use_xml:
-                logger.info(f"Using fallback method for protocol {doc_identifier}")
+            # If we couldn't get speeches from XML, fall back to the regular method
+            if not protocol.speeches:
+                logger.info(f"XML extraction failed or incomplete, using fallback method for protocol {doc_identifier}")
                 
                 # Get JSON text data if needed
                 if include_full_text and not protocol.full_text:
@@ -442,56 +448,84 @@ class ProtocolParser:
     
     def parse_protocol_speeches(self, protocol: PlenarProtocol) -> List[Speech]:
         """
-        Extract speech texts from the full protocol text.
-        This is a more advanced parser that would extract the actual speech texts
-        based on page numbers and other markers in the full text.
+        Extract speech texts from the full protocol text using multiple strategies.
+        The implementation uses a tiered approach with different extraction strategies:
+        1. XML-based extraction (highest quality)
+        2. Pattern-based extraction (medium quality)
+        3. Page-based extraction (lower quality)
         
         Args:
-            protocol: PlenarProtocol with full_text
+            protocol: PlenarProtocol with full_text and speeches
             
         Returns:
             Updated list of speeches with extracted text
         """
-        if not protocol.full_text:
-            raise ValueError("Protocol full text is required to extract speeches")
+        from bundestag_protocol_extractor.parsers.extraction_strategies.factory import ExtractionStrategyFactory
         
-        full_text = protocol.full_text
-        speeches = []
-        
-        # For each speech in the protocol
-        for speech in protocol.speeches:
-            # This would require a more sophisticated algorithm to extract the exact text
-            # based on page numbers, speaker names, etc.
-            # For now, we'll just use a placeholder extraction
+        if not protocol.speeches:
+            logger.warning("No speeches to extract")
+            return []
             
-            # If we have page markers, try to extract text between them
-            if speech.page_start:
-                # Extract a section around the page marker
-                page_marker = speech.page_start
+        # Create extraction strategy factory
+        factory = ExtractionStrategyFactory(self.api_client)
+        
+        # Get strategies in order of preference
+        strategies = factory.create_tiered_strategy_list()
+        
+        # Try each strategy in order until we get results
+        speeches = protocol.speeches.copy()
+        pending_speeches = speeches.copy()
+        
+        for strategy in strategies:
+            if not pending_speeches:
+                break
                 
-                # Simple approach: find text near the page marker
-                # In a real implementation, this would be much more sophisticated
-                try:
-                    # Find the page in the text
-                    page_index = full_text.find(f"S. {page_marker}")
-                    if page_index == -1:
-                        page_index = full_text.find(page_marker)
-                    
-                    if page_index != -1:
-                        # Take some text after the page index
-                        start_index = page_index + len(page_marker) + 10
-                        end_index = min(start_index + 1000, len(full_text))
-                        
-                        # Extract text
-                        extracted_text = full_text[start_index:end_index]
-                        
-                        # Update speech with extracted text
-                        speech.text = extracted_text
-                except Exception as e:
-                    # If extraction fails, keep the placeholder
-                    print(f"Failed to extract speech text: {e}")
+            logger.info(f"Trying extraction strategy: {strategy.name}")
             
-            speeches.append(speech)
+            # Check if this strategy can be applied
+            if not strategy.can_extract(protocol):
+                logger.warning(f"Strategy {strategy.name} cannot be applied to this protocol")
+                continue
+                
+            # Apply the strategy to pending speeches
+            try:
+                extracted_speeches = strategy.extract(protocol, pending_speeches)
+                
+                # Update the main speeches list
+                for i, speech in enumerate(speeches):
+                    # Find the corresponding extracted speech
+                    for extracted in extracted_speeches:
+                        if extracted.id == speech.id:
+                            # Check if we got a successful extraction
+                            if (extracted.extraction_status == "complete" or 
+                                extracted.extraction_status == "partial"):
+                                # Update the speech with extracted data
+                                speech.text = extracted.text
+                                speech.extraction_method = extracted.extraction_method
+                                speech.extraction_status = extracted.extraction_status
+                                speech.extraction_confidence = extracted.extraction_confidence
+                                
+                                # Remove from pending speeches
+                                pending_speeches = [s for s in pending_speeches if s.id != speech.id]
+                            break
+                            
+            except Exception as e:
+                logger.error(f"Error in {strategy.name} extraction strategy: {e}")
+                continue
+                
+            # If we have no more pending speeches, we're done
+            if not pending_speeches:
+                break
+                
+        # Mark any remaining speeches as failed
+        for speech in pending_speeches:
+            speaker_name = f"{speech.speaker.titel} {speech.speaker.vorname} {speech.speaker.nachname}".strip()
+            speech.text = f"[EXTRACTION_FAILED:ALL_STRATEGIES_FAILED] Speech referenced at page {speech.page_start or 'unknown'}, speaker: {speaker_name}"
+            speech.extraction_method = "none"
+            speech.extraction_status = "failed"
+            speech.extraction_confidence = 0.0
+            
+        logger.info(f"Speech extraction complete: {len(speeches) - len(pending_speeches)}/{len(speeches)} speeches extracted")
         
         return speeches
     

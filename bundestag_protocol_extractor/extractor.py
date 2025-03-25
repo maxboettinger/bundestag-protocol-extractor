@@ -33,7 +33,10 @@ class BundestagExtractor:
         output_dir: str = "output", 
         max_retries: int = 3, 
         retry_delay: float = 1.0,
-        resume_from: Optional[str] = None
+        resume_from: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        enable_xml_cache: bool = True,
+        repair_xml: bool = True
     ):
         """
         Initialize the extractor.
@@ -44,22 +47,48 @@ class BundestagExtractor:
             max_retries: Maximum number of retries for rate limiting
             retry_delay: Base delay in seconds between retries
             resume_from: Optional path to a progress file to resume from
+            cache_dir: Directory to use for XML caching (defaults to output_dir/cache)
+            enable_xml_cache: Whether to enable XML caching
+            repair_xml: Whether to attempt repairing malformed XML
         """
         self.output_dir = Path(output_dir)
         os.makedirs(self.output_dir, exist_ok=True)
         
+        # Setup XML caching
+        self.enable_xml_cache = enable_xml_cache
+        self.repair_xml = repair_xml
+        
+        if enable_xml_cache:
+            if cache_dir is None:
+                cache_dir = str(self.output_dir / "cache" / "xml")
+            os.makedirs(cache_dir, exist_ok=True)
+            logger.info(f"XML caching enabled in {cache_dir}")
+        else:
+            cache_dir = None
+            logger.info("XML caching disabled")
+        
         # Use provided API key or default to the public key
         api_key = api_key or self.DEFAULT_API_KEY
-        self.api_client = BundestagAPIClient(api_key)
-        self.parser = ProtocolParser(self.api_client, max_retries=max_retries, retry_delay=retry_delay)
+        self.api_client = BundestagAPIClient(api_key, cache_dir=cache_dir)
+        self.parser = ProtocolParser(
+            self.api_client, 
+            max_retries=max_retries, 
+            retry_delay=retry_delay,
+            repair_xml=repair_xml
+        )
         self.exporter = Exporter(output_dir)
         
         # Store parameters for potential resume
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.resume_from = resume_from
+        self.cache_dir = cache_dir
         
-        logger.info(f"Initialized BundestagExtractor (output_dir={output_dir}, max_retries={max_retries})")
+        logger.info(
+            f"Initialized BundestagExtractor (output_dir={output_dir}, "
+            f"max_retries={max_retries}, xml_cache={'enabled' if enable_xml_cache else 'disabled'}, "
+            f"xml_repair={'enabled' if repair_xml else 'disabled'})"
+        )
     
     def get_protocols(
         self, 
@@ -67,8 +96,7 @@ class BundestagExtractor:
         limit: Optional[int] = None,
         offset: int = 0,
         index: Optional[int] = None,
-        resume_from_doc: Optional[str] = None,
-        use_xml: bool = True
+        resume_from_doc: Optional[str] = None
     ) -> List[PlenarProtocol]:
         """
         Get plenarprotocols for a specific legislative period.
@@ -79,7 +107,6 @@ class BundestagExtractor:
             offset: Skip the first N protocols
             index: Start processing from a specific protocol index
             resume_from_doc: Resume processing from a specific protocol number
-            use_xml: Whether to use XML parsing for speeches
             
         Returns:
             List of PlenarProtocol objects
@@ -91,7 +118,6 @@ class BundestagExtractor:
             'offset': offset,
             'index': index,
             'resume_from_doc': resume_from_doc,
-            'use_xml': use_xml,
             'max_retries': self.max_retries,
             'retry_delay': self.retry_delay
         }
@@ -175,7 +201,6 @@ class BundestagExtractor:
                 # Parse full protocol
                 protocol = self.parser.parse_protocol(
                     protocol_id,
-                    use_xml=use_xml,
                     progress_tracker=progress
                 )
                 protocols.append(protocol)

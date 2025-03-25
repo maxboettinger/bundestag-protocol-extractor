@@ -42,6 +42,10 @@ This package allows researchers, journalists, and political analysts to access G
 - **Automatic Rate Limiting**: Robust handling of API limits with exponential backoff
 - **Progress Tracking**: Resume long-running extractions if interrupted
 - **Flexible Configuration**: Fine-tune extraction parameters based on your needs
+- **Multi-strategy Extraction**: Tiered extraction approach with automatic fallbacks
+- **Quality Tracking**: Detailed extraction metadata for research transparency
+- **XML Caching**: Efficient storage and retrieval of previously downloaded documents
+- **Pattern Recognition**: Sophisticated text pattern matching for speech extraction
 
 ## 📋 Detailed Usage
 
@@ -57,11 +61,20 @@ bpe --help
 # Extract all protocols from the current legislative period
 bpe --period 20 --output-dir ./data
 
-# Use XML parsing for more detailed extraction (default)
-bpe --period 20 --use-xml
+# Enable XML caching for faster subsequent runs (default)
+bpe --period 20 --enable-xml-cache
 
-# Disable XML parsing (faster but less detailed)
-bpe --period 20 --no-xml
+# Disable XML caching
+bpe --period 20 --disable-xml-cache
+
+# Specify a custom cache directory
+bpe --period 20 --cache-dir /path/to/cache/dir
+
+# Enable automatic repair of malformed XML (default)
+bpe --period 20 --repair-xml
+
+# Disable XML repair
+bpe --period 20 --no-repair-xml
 ```
 
 #### Control Output Format
@@ -126,8 +139,13 @@ import logging
 # Initialize the extractor (uses default public API key)
 extractor = BundestagExtractor()
 
-# Or with your own API key
-# extractor = BundestagExtractor(api_key="YOUR_API_KEY")
+# Or with your own API key and XML options
+# extractor = BundestagExtractor(
+#     api_key="YOUR_API_KEY",
+#     enable_xml_cache=True,
+#     cache_dir="./cache",
+#     repair_xml=True
+# )
 
 # Fetch protocols for a specific legislative period (20th Bundestag)
 protocols = extractor.get_protocols(period=20, limit=5)
@@ -161,6 +179,47 @@ The extracted data is organized in a relational format with multiple CSV files:
 7. **comments.csv**: Comments and interjections
 8. **agenda_items.csv**: Agenda items for each session
 9. **toc.csv**: Table of contents with document structure
+
+### Extraction Quality Metadata
+
+Each extracted speech includes quality metadata fields:
+
+- **extraction_method**: The method used to extract the speech text:
+  - `xml`: Extracted from structured XML (highest quality)
+  - `pattern`: Extracted using pattern matching from text
+  - `page`: Extracted from page references only (lower quality)
+  - `none`: No text extraction was possible
+
+- **extraction_status**: The status of the extraction:
+  - `complete`: Successfully extracted full text
+  - `partial`: Only partial text was extracted
+  - `failed`: Extraction failed
+
+- **extraction_confidence**: A confidence score from 0.0 to 1.0:
+  - 1.0: High confidence (XML extraction)
+  - 0.6-0.8: Medium confidence (pattern matching)
+  - 0.1-0.5: Low confidence (page-based extraction)
+  - 0.0: No confidence (extraction failed)
+
+These fields allow researchers to filter speeches based on extraction quality for their analyses.
+
+### Data Science Integration
+
+The package includes tools specifically designed for data science workflows:
+
+- **Quality Reports**: Comprehensive reports on extraction quality with detailed statistics
+- **Interactive Visualizations**: Charts and graphs for analyzing extraction quality
+- **Pandas Integration**: Helper functions for working with extracted data in pandas
+- **Jupyter Notebook Example**: Example workflow for analyzing extraction data
+
+Each export automatically includes:
+
+1. **HTML Quality Report**: Interactive report with visualizations
+2. **JSON Quality Data**: Machine-readable quality statistics
+3. **Quality Visualizations**: PNG charts showing extraction distributions
+4. **Helper Columns**: Boolean fields for easy filtering in pandas
+
+See the [examples/data_science_workflow.ipynb](examples/data_science_workflow.ipynb) notebook for a detailed demonstration of how to work with the data in a research context.
 
 ## 🔑 API Key
 
