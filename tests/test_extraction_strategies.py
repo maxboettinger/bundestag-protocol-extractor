@@ -3,7 +3,7 @@
 import xml.etree.ElementTree as ET
 
 import pytest
-from pytest.mock import MagicMock
+from unittest.mock import MagicMock
 
 from bundestag_protocol_extractor.api.client import BundestagAPIClient
 from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech
