@@ -6,11 +6,35 @@ This script automates the process of creating a new release:
 1. Validates the project and runs tests
 2. Updates version numbers
 3. Builds and verifies distribution packages
-4. Creates git tag and commits changes
+4. Creates git tag and commits changes (only after all checks pass)
 5. Uploads to PyPI (with confirmation)
 
-Usage:
+Basic Usage:
     python scripts/release.py [major|minor|patch]
+
+Options:
+    --dry-run        Don't actually make changes, just print what would happen
+    --test           Upload to TestPyPI instead of PyPI
+    --skip-lint      Skip linting checks
+    --skip-tests     Skip running tests
+    --auto-format    Automatically fix formatting issues with Black and isort
+    --format-only    Only run formatting (Black and isort) without proceeding with release
+
+Examples:
+    # Standard release with version bump
+    python scripts/release.py patch
+    
+    # Auto-format code and perform release
+    python scripts/release.py minor --auto-format
+    
+    # Just format the code without releasing
+    python scripts/release.py patch --format-only
+    
+    # Test the release process without making changes
+    python scripts/release.py patch --dry-run
+    
+    # Upload to TestPyPI for testing
+    python scripts/release.py patch --test
 """
 import argparse
 import contextlib
@@ -164,31 +188,88 @@ class ReleaseManager:
 
         print(f"Updated version to {version_str} in files")
 
-    def run_linting(self) -> bool:
+    def run_linting(self, auto_fix: bool = False) -> bool:
         """Run linting checks on the codebase.
+        
+        Args:
+            auto_fix: If True, attempt to automatically fix linting issues
         
         Returns:
             True if linting passes, False otherwise
         """
         print("Running linting checks...")
+        linting_failed = False
+        errors = []
+        
+        # Install black with jupyter support if needed
         try:
-            # Run Black
-            self.run_command(["black", "--check", "."])
-            
-            # Run isort
-            self.run_command(["isort", "--check", "."])
-            
-            # Run flake8
-            self.run_command(["flake8", "."])
-            
-            # Run mypy
-            self.run_command(["mypy", "."])
-            
-            print("✅ Linting checks passed")
-            return True
+            self.run_command(["pip", "install", "--quiet", "black[jupyter]"])
         except subprocess.CalledProcessError:
-            print("❌ Linting checks failed! Fix the issues before releasing.")
+            print("Warning: Could not install black with jupyter support.")
+        
+        # Run Black
+        try:
+            if auto_fix:
+                print("\n📝 Running Black formatter...")
+                self.run_command(["black", "."])
+            else:
+                print("\n🔍 Checking code formatting with Black...")
+                self.run_command(["black", "--check", "."])
+        except subprocess.CalledProcessError as e:
+            linting_failed = True
+            errors.append("Black formatting check failed")
+            if not auto_fix:
+                print("\n🔧 To automatically fix formatting issues, run:")
+                print("   black .")
+        
+        # Run isort
+        try:
+            if auto_fix:
+                print("\n📝 Running isort to sort imports...")
+                self.run_command(["isort", "."])
+            else:
+                print("\n🔍 Checking import sorting with isort...")
+                self.run_command(["isort", "--check", "."])
+        except subprocess.CalledProcessError:
+            linting_failed = True
+            errors.append("Import sorting check failed")
+            if not auto_fix:
+                print("\n🔧 To automatically fix import sorting issues, run:")
+                print("   isort .")
+        
+        # Run flake8
+        try:
+            print("\n🔍 Checking code style with flake8...")
+            self.run_command(["flake8", "."])
+        except subprocess.CalledProcessError:
+            linting_failed = True
+            errors.append("Flake8 code style check failed")
+            print("\n⚠️ Flake8 issues must be fixed manually")
+        
+        # Run mypy
+        try:
+            print("\n🔍 Checking type annotations with mypy...")
+            self.run_command(["mypy", "."])
+        except subprocess.CalledProcessError:
+            linting_failed = True
+            errors.append("Type checking with mypy failed")
+            print("\n⚠️ Type checking issues must be fixed manually")
+        
+        if linting_failed:
+            print("\n❌ Linting checks failed! Issues found:")
+            for error in errors:
+                print(f"   - {error}")
+            
+            if auto_fix:
+                print("\n⚠️ Some issues were automatically fixed, but manual fixes are still required.")
+            else:
+                print("\n💡 You can try to automatically fix some issues with:")
+                print("   python scripts/release.py --auto-format <version>")
+            
             return False
+        
+        print("\n✅ All linting checks passed!")
+        return True
 
     def run_tests(self) -> bool:
         """Run tests to ensure package quality before release.
@@ -448,14 +529,20 @@ class ReleaseManager:
             shutil.rmtree(self.temp_dir)
             self.temp_dir = None
 
-    def release(self) -> bool:
+    def release(self, auto_format: bool = False, skip_lint: bool = False, 
+               skip_tests: bool = False) -> bool:
         """Run the release process.
+        
+        Args:
+            auto_format: If True, automatically fix formatting issues
+            skip_lint: If True, skip linting checks
+            skip_tests: If True, skip running tests
         
         Returns:
             True if the release was successful, False otherwise
         """
         try:
-            print("Starting release process...")
+            print("\n📦 Starting release process...")
             
             # Check dependencies
             print("\n=== Checking dependencies ===")
@@ -480,17 +567,29 @@ class ReleaseManager:
             print(f"New version: {self.version_str}")
             
             if self.dry_run:
-                print("Dry run mode: no changes will be made")
+                print("🔍 Dry run mode: no changes will be made")
+            
+            # Run linting checks if not skipped
+            if not skip_lint:
+                print("\n=== Running linting checks ===")
+                if not self.run_linting(auto_fix=auto_format):
+                    if auto_format:
+                        print("\n⚠️ Auto-formatting was applied but some issues remain.")
+                        print("   Please fix the remaining issues manually and try again.")
+                    else:
+                        print("\n⚠️ Linting checks failed. Run with --auto-format to attempt automatic fixes.")
+                    return False
+            else:
+                print("\n=== Skipping linting checks ===")
                 
-            # Run linting
-            print("\n=== Running linting checks ===")
-            if not self.run_linting():
-                return False
-                
-            # Run tests
-            print("\n=== Running tests ===")
-            if not self.run_tests():
-                return False
+            # Run tests if not skipped
+            if not skip_tests:
+                print("\n=== Running tests ===")
+                if not self.run_tests():
+                    print("\n⚠️ Tests failed. Please fix the failing tests before releasing.")
+                    return False
+            else:
+                print("\n=== Skipping tests ===")
                 
             # Update version in files
             print("\n=== Updating version ===")
@@ -503,11 +602,13 @@ class ReleaseManager:
             # Build package
             print("\n=== Building package ===")
             if not self.build_package():
+                print("\n⚠️ Package build failed. Please fix the build issues and try again.")
                 return False
                 
             # Verify installation
             print("\n=== Verifying installation ===")
             if not self.verify_installation():
+                print("\n⚠️ Installation verification failed. The package may not be installable.")
                 return False
                 
             # Only create the git tag after all tests and verification have passed
@@ -535,10 +636,10 @@ class ReleaseManager:
                 if push_response.lower() == "y":
                     self.push_changes()
             
-            print(f"✨ Released version {self.version_str}")
+            print(f"\n✨ Released version {self.version_str}")
             
             # Suggest next steps
-            print("\nNext steps:")
+            print("\n📝 Next steps:")
             print(
                 f"1. Create a GitHub release at: https://github.com/maxboettinger/bundestag-protocol-extractor/releases/new?tag=v{self.version_str}"
             )
@@ -550,10 +651,12 @@ class ReleaseManager:
             return True
             
         except ReleaseError as e:
-            print(f"Release failed: {e}")
+            print(f"\n❌ Release failed: {e}")
             return False
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            print(f"\n❌ Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
             return False
         finally:
             self.cleanup()
@@ -581,14 +684,50 @@ def main():
     parser.add_argument(
         "--skip-tests", action="store_true", help="Skip running tests"
     )
+    parser.add_argument(
+        "--auto-format", 
+        action="store_true", 
+        help="Automatically fix formatting issues with Black and isort"
+    )
+    parser.add_argument(
+        "--format-only",
+        action="store_true",
+        help="Only run formatting (Black and isort) without proceeding with release"
+    )
     args = parser.parse_args()
 
-    # Create and run the release manager
+    # Handle format-only option
+    if args.format_only:
+        print("Running formatters only (Black and isort)...")
+        try:
+            subprocess.run(["pip", "install", "--quiet", "black[jupyter]"], check=False)
+            subprocess.run(["black", "."], check=True)
+            subprocess.run(["isort", "."], check=True)
+            print("✅ Formatting complete!")
+            return
+        except subprocess.CalledProcessError:
+            print("❌ Formatting failed!")
+            sys.exit(1)
+
+    # Create release manager
     manager = ReleaseManager(args.bump, args.dry_run, args.test)
-    success = manager.release()
+    
+    # Run the release process
+    success = manager.release(
+        auto_format=args.auto_format,
+        skip_lint=args.skip_lint,
+        skip_tests=args.skip_tests
+    )
     
     if not success:
+        print("\n❌ Release process failed! See errors above.")
+        print("\n💡 Possible solutions:")
+        print("   - Run with --auto-format to fix formatting issues")
+        print("   - Run with --format-only to just fix formatting without releasing")
+        print("   - Fix issues manually and try again")
         sys.exit(1)
+    
+    print("\n✅ Release process completed successfully!")
 
 
 if __name__ == "__main__":
