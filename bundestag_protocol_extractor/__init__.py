@@ -5,7 +5,7 @@ A package that extracts and structures information from the German Bundestag's o
 particularly plenarprotocols (parliamentary sessions) with full-text speeches.
 """
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 __author__ = "Max Boettinger"
 __email__ = "github@bttngr.de"
 

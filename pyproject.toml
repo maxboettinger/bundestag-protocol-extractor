@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bundestag-protocol-extractor"
-version = "0.1.9"
+version = "0.1.10"
 description = "A package that extracts and structures information from the German Bundestag's open data API"
 readme = "README.md"
 requires-python = ">=3.9"
