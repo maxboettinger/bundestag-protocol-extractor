@@ -1,15 +1,16 @@
 """
 Data models for the Bundestag protocol extractor.
 """
+
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Dict, List, Optional, Union, Any
+from typing import Any, Dict, List, Optional, Union
 
 
 @dataclass
 class Person:
     """Represents a person (member of the Bundestag or other speaker)."""
-    
+
     id: int
     nachname: str
     vorname: str
@@ -25,7 +26,7 @@ class Person:
 @dataclass
 class Speech:
     """Represents a speech in a plenarprotokoll."""
-    
+
     id: int
     speaker: Person
     title: str
@@ -37,9 +38,13 @@ class Speech:
     page_end: Optional[str] = None
     topics: List[str] = field(default_factory=list)
     related_proceedings: List[Dict[str, Any]] = field(default_factory=list)
-    is_interjection: bool = False  # Whether this speech is an interjection (Zwischenruf)
-    is_presidential_announcement: bool = False  # Whether this speech is a presidential announcement of the next speaker
-    
+    is_interjection: bool = (
+        False  # Whether this speech is an interjection (Zwischenruf)
+    )
+    is_presidential_announcement: bool = (
+        False  # Whether this speech is a presidential announcement of the next speaker
+    )
+
     # Extraction metadata fields
     extraction_method: str = "unknown"  # "xml", "pattern", "page", "none"
     extraction_status: str = "unknown"  # "complete", "partial", "failed"
@@ -49,7 +54,7 @@ class Speech:
 @dataclass
 class PlenarProtocol:
     """Represents a plenarprotokoll."""
-    
+
     id: int
     dokumentnummer: str
     wahlperiode: int
@@ -61,7 +66,7 @@ class PlenarProtocol:
     proceedings: List[Dict[str, Any]] = field(default_factory=list)
     pdf_url: Optional[str] = None
     updated_at: Optional[datetime] = None
-    
+
     # Additional XML metadata
     toc: List[Dict[str, Any]] = field(default_factory=list)
     agenda_items: List[Dict[str, Any]] = field(default_factory=list)

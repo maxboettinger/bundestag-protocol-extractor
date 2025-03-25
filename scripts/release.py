@@ -23,16 +23,16 @@ Options:
 Examples:
     # Standard release with version bump
     python scripts/release.py patch
-    
+
     # Auto-format code and perform release
     python scripts/release.py minor --auto-format
-    
+
     # Just format the code without releasing
     python scripts/release.py patch --format-only
-    
+
     # Test the release process without making changes
     python scripts/release.py patch --dry-run
-    
+
     # Upload to TestPyPI for testing
     python scripts/release.py patch --test
 """
@@ -59,6 +59,7 @@ PYPROJECT_PATH = "pyproject.toml"
 
 class ReleaseStep(Enum):
     """Enumeration of steps in the release process."""
+
     PREPARE = "prepare"
     LINT = "lint"
     TEST = "test"
@@ -72,6 +73,7 @@ class ReleaseStep(Enum):
 
 class ReleaseError(Exception):
     """Exception raised when a release step fails."""
+
     def __init__(self, step: ReleaseStep, message: str):
         self.step = step
         self.message = message
@@ -83,7 +85,7 @@ class ReleaseManager:
 
     def __init__(self, bump_type: str, dry_run: bool = False, test_pypi: bool = False):
         """Initialize the release manager.
-        
+
         Args:
             bump_type: Type of version bump ('major', 'minor', or 'patch')
             dry_run: If True, don't make any changes
@@ -98,30 +100,28 @@ class ReleaseManager:
         self.tag_created = False
         self.changes_committed = False
         self.temp_dir: Optional[Path] = None
-    
-    def run_command(self, command: List[str], check: bool = True, 
-                   capture_output: bool = False) -> subprocess.CompletedProcess:
+
+    def run_command(
+        self, command: List[str], check: bool = True, capture_output: bool = False
+    ) -> subprocess.CompletedProcess:
         """Run a command and return the result.
-        
+
         Args:
             command: Command to run
             check: If True, raise an exception if the command fails
             capture_output: If True, capture the command output
-            
+
         Returns:
             The completed process
         """
         print(f"Running: {' '.join(command)}")
         return subprocess.run(
-            command, 
-            check=check, 
-            capture_output=capture_output,
-            text=capture_output
+            command, check=check, capture_output=capture_output, text=capture_output
         )
 
     def get_current_version(self) -> Tuple[int, int, int]:
         """Get current version from __init__.py.
-        
+
         Returns:
             The current version as a tuple (major, minor, patch)
         """
@@ -129,15 +129,19 @@ class ReleaseManager:
             content = f.read()
             version_match = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', content)
             if not version_match:
-                raise ReleaseError(ReleaseStep.PREPARE, f"Could not find version in {INIT_PATH}")
+                raise ReleaseError(
+                    ReleaseStep.PREPARE, f"Could not find version in {INIT_PATH}"
+                )
             return tuple(map(int, version_match.groups()))
 
-    def bump_version(self, current_version: Tuple[int, int, int]) -> Tuple[int, int, int]:
+    def bump_version(
+        self, current_version: Tuple[int, int, int]
+    ) -> Tuple[int, int, int]:
         """Bump version based on bump_type.
-        
+
         Args:
             current_version: Current version as a tuple (major, minor, patch)
-            
+
         Returns:
             The new version as a tuple (major, minor, patch)
         """
@@ -150,18 +154,20 @@ class ReleaseManager:
         elif self.bump_type == "patch":
             return (major, minor, patch + 1)
         else:
-            raise ReleaseError(ReleaseStep.VERSION, f"Invalid bump type: {self.bump_type}")
+            raise ReleaseError(
+                ReleaseStep.VERSION, f"Invalid bump type: {self.bump_type}"
+            )
 
     def update_version_in_files(self, new_version: Tuple[int, int, int]) -> None:
         """Update version in __init__.py and pyproject.toml.
-        
+
         Args:
             new_version: New version as a tuple (major, minor, patch)
         """
         if self.dry_run:
             print("Dry run: would update version in files")
             return
-            
+
         version_str = f"{new_version[0]}.{new_version[1]}.{new_version[2]}"
 
         # Update __init__.py
@@ -190,23 +196,23 @@ class ReleaseManager:
 
     def run_linting(self, auto_fix: bool = False) -> bool:
         """Run linting checks on the codebase.
-        
+
         Args:
             auto_fix: If True, attempt to automatically fix linting issues
-        
+
         Returns:
             True if linting passes, False otherwise
         """
         print("Running linting checks...")
         linting_failed = False
         errors = []
-        
+
         # Install black with jupyter support if needed
         try:
             self.run_command(["pip", "install", "--quiet", "black[jupyter]"])
         except subprocess.CalledProcessError:
             print("Warning: Could not install black with jupyter support.")
-        
+
         # Run Black
         try:
             if auto_fix:
@@ -221,7 +227,7 @@ class ReleaseManager:
             if not auto_fix:
                 print("\n🔧 To automatically fix formatting issues, run:")
                 print("   black .")
-        
+
         # Run isort
         try:
             if auto_fix:
@@ -236,7 +242,7 @@ class ReleaseManager:
             if not auto_fix:
                 print("\n🔧 To automatically fix import sorting issues, run:")
                 print("   isort .")
-        
+
         # Run flake8
         try:
             print("\n🔍 Checking code style with flake8...")
@@ -245,7 +251,7 @@ class ReleaseManager:
             linting_failed = True
             errors.append("Flake8 code style check failed")
             print("\n⚠️ Flake8 issues must be fixed manually")
-        
+
         # Run mypy
         try:
             print("\n🔍 Checking type annotations with mypy...")
@@ -254,31 +260,33 @@ class ReleaseManager:
             linting_failed = True
             errors.append("Type checking with mypy failed")
             print("\n⚠️ Type checking issues must be fixed manually")
-        
+
         if linting_failed:
             print("\n❌ Linting checks failed! Issues found:")
             for error in errors:
                 print(f"   - {error}")
-            
+
             if auto_fix:
-                print("\n⚠️ Some issues were automatically fixed, but manual fixes are still required.")
+                print(
+                    "\n⚠️ Some issues were automatically fixed, but manual fixes are still required."
+                )
             else:
                 print("\n💡 You can try to automatically fix some issues with:")
                 print("   python scripts/release.py --auto-format <version>")
-            
+
             return False
-        
+
         print("\n✅ All linting checks passed!")
         return True
 
     def run_tests(self) -> bool:
         """Run tests to ensure package quality before release.
-        
+
         Returns:
             True if tests pass, False otherwise
         """
         print("Running tests before release...")
-        
+
         # Run all tests with pytest
         try:
             print("Running pytest suite...")
@@ -286,44 +294,47 @@ class ReleaseManager:
         except subprocess.CalledProcessError:
             print("❌ Tests failed! Fix the issues before releasing.")
             return False
-        
+
         # Verify critical module imports
         try:
             print("Verifying critical module imports...")
-            
+
             # Test package can be imported
             test_import_cmd = [
-                "python", "-c", 
+                "python",
+                "-c",
                 "import importlib.util; "
                 "spec = importlib.util.find_spec('bundestag_protocol_extractor.utils.logging'); "
-                "print('✓ Critical module check: logging module can be imported' if spec else '❌ Critical module check: logging module MISSING!')"
+                "print('✓ Critical module check: logging module can be imported' if spec else '❌ Critical module check: logging module MISSING!')",
             ]
-            
+
             # Run the import test
             result = self.run_command(test_import_cmd, capture_output=True)
             print(result.stdout.strip())
-            
+
             if "MISSING" in result.stdout:
-                print("❌ Critical module check failed. Package may be missing required modules.")
+                print(
+                    "❌ Critical module check failed. Package may be missing required modules."
+                )
                 return False
-            
+
         except subprocess.CalledProcessError:
             print("❌ Package verification failed!")
             return False
-        
+
         print("✅ All tests passed!")
         return True
 
     def build_package(self) -> bool:
         """Build the package.
-        
+
         Returns:
             True if package built successfully, False otherwise
         """
         if self.dry_run:
             print("Dry run: would build package")
             return True
-            
+
         # Clean dist directory
         if os.path.exists("dist"):
             for file in os.listdir("dist"):
@@ -333,12 +344,12 @@ class ReleaseManager:
         try:
             self.run_command(["python", "-m", "build"])
             print("✅ Built distribution packages")
-            
+
             # Verify the built distribution with twine
             print("Verifying built packages with twine...")
             self.run_command(["twine", "check", "dist/*"])
             print("✅ Package verification passed")
-            
+
             return True
         except subprocess.CalledProcessError:
             print("❌ Package build or verification failed!")
@@ -346,37 +357,37 @@ class ReleaseManager:
 
     def verify_installation(self) -> bool:
         """Verify the built package can be installed and imported.
-        
+
         Returns:
             True if installation verification passes, False otherwise
         """
         if self.dry_run:
             print("Dry run: would verify installation")
             return True
-            
+
         print("Testing installation in virtual environment...")
-        
+
         # Create a temporary directory for the virtual environment
         self.temp_dir = Path(tempfile.mkdtemp())
         venv_dir = self.temp_dir / "venv"
-        
+
         try:
             # Create virtual environment
             self.run_command([sys.executable, "-m", "venv", str(venv_dir)])
-            
+
             # Determine paths based on platform
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 python_cmd = str(venv_dir / "Scripts" / "python")
                 pip_cmd = str(venv_dir / "Scripts" / "pip")
             else:
                 python_cmd = str(venv_dir / "bin" / "python")
                 pip_cmd = str(venv_dir / "bin" / "pip")
-            
+
             # Install the package
             print("Installing package in test environment...")
             wheel_file = next(Path("dist").glob("*.whl"))
             self.run_command([pip_cmd, "install", str(wheel_file)])
-            
+
             # Test importing critical modules
             print("Verifying critical module imports...")
             test_modules = [
@@ -385,17 +396,18 @@ class ReleaseManager:
                 "bundestag_protocol_extractor.api.client",
                 "bundestag_protocol_extractor.parsers.protocol_parser",
             ]
-            
+
             for module in test_modules:
                 test_cmd = [
-                    python_cmd, "-c", 
-                    f"import {module}; print(f'✅ Successfully imported {module}')"
+                    python_cmd,
+                    "-c",
+                    f"import {module}; print(f'✅ Successfully imported {module}')",
                 ]
                 self.run_command(test_cmd)
-            
+
             print("✅ Installation verification passed")
             return True
-            
+
         except subprocess.CalledProcessError as e:
             print(f"❌ Installation verification failed: {e}")
             return False
@@ -410,11 +422,13 @@ class ReleaseManager:
         if self.dry_run:
             print("Dry run: would commit version changes")
             return
-            
+
         if not self.new_version:
             raise ReleaseError(ReleaseStep.VERSION, "New version not set")
-            
-        version_str = f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+
+        version_str = (
+            f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+        )
 
         # Add files
         self.run_command(["git", "add", INIT_PATH, PYPROJECT_PATH])
@@ -430,17 +444,17 @@ class ReleaseManager:
         if self.dry_run:
             print("Dry run: would create git tag")
             return
-            
+
         if not self.new_version:
             raise ReleaseError(ReleaseStep.TAG, "New version not set")
-            
-        version_str = f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+
+        version_str = (
+            f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+        )
         tag = f"v{version_str}"
 
         # Check if tag exists
-        result = self.run_command(
-            ["git", "tag", "-l", tag], capture_output=True
-        )
+        result = self.run_command(["git", "tag", "-l", tag], capture_output=True)
 
         if tag in result.stdout.strip().split("\n"):
             print(f"Tag {tag} already exists")
@@ -456,7 +470,7 @@ class ReleaseManager:
         if self.dry_run:
             print("Dry run: would upload to PyPI")
             return
-            
+
         if self.test_pypi:
             self.run_command(["twine", "upload", "--repository", "testpypi", "dist/*"])
             print("Uploaded to TestPyPI")
@@ -469,33 +483,33 @@ class ReleaseManager:
         if self.dry_run:
             print("Dry run: would push changes and tags")
             return
-            
+
         self.run_command(["git", "push"])
         self.run_command(["git", "push", "--tags"])
         print("Pushed changes and tag to remote")
 
     def check_dependencies(self) -> bool:
         """Check if required dependencies are installed.
-        
+
         Returns:
             True if all dependencies are installed, False otherwise
         """
         try:
             # Ensure build and twine are installed
             self.run_command(["pip", "install", "--quiet", "build", "twine"])
-            
+
             # Check for git
             self.run_command(["git", "--version"])
-            
+
             # Check for pytest
             self.run_command(["pytest", "--version"])
-            
+
             # Check for black, isort, flake8, mypy
             self.run_command(["black", "--version"])
             self.run_command(["isort", "--version"])
             self.run_command(["flake8", "--version"])
             self.run_command(["mypy", "--version"])
-            
+
             return True
         except subprocess.CalledProcessError as e:
             print(f"Missing dependency: {e}")
@@ -503,14 +517,12 @@ class ReleaseManager:
 
     def check_git_status(self) -> bool:
         """Check if the git repository is clean.
-        
+
         Returns:
             True if the repository is clean, False otherwise
         """
         # Check for uncommitted changes
-        result = self.run_command(
-            ["git", "status", "--porcelain"], capture_output=True
-        )
+        result = self.run_command(["git", "status", "--porcelain"], capture_output=True)
 
         if result.stdout.strip() and not (
             "bundestag_protocol_extractor/__init__.py" in result.stdout
@@ -520,7 +532,7 @@ class ReleaseManager:
                 "There are uncommitted changes. Please commit or stash them before releasing."
             )
             return False
-            
+
         return True
 
     def cleanup(self) -> None:
@@ -529,92 +541,110 @@ class ReleaseManager:
             shutil.rmtree(self.temp_dir)
             self.temp_dir = None
 
-    def release(self, auto_format: bool = False, skip_lint: bool = False, 
-               skip_tests: bool = False) -> bool:
+    def release(
+        self,
+        auto_format: bool = False,
+        skip_lint: bool = False,
+        skip_tests: bool = False,
+    ) -> bool:
         """Run the release process.
-        
+
         Args:
             auto_format: If True, automatically fix formatting issues
             skip_lint: If True, skip linting checks
             skip_tests: If True, skip running tests
-        
+
         Returns:
             True if the release was successful, False otherwise
         """
         try:
             print("\n📦 Starting release process...")
-            
+
             # Check dependencies
             print("\n=== Checking dependencies ===")
             if not self.check_dependencies():
-                print("❌ Required dependencies are missing. Please install them and try again.")
+                print(
+                    "❌ Required dependencies are missing. Please install them and try again."
+                )
                 return False
-                
+
             # Check git status
             print("\n=== Checking git status ===")
             if not self.check_git_status():
                 return False
-                
+
             # Get current version
             self.current_version = self.get_current_version()
             print(
                 f"Current version: {self.current_version[0]}.{self.current_version[1]}.{self.current_version[2]}"
             )
-            
+
             # Bump version
             self.new_version = self.bump_version(self.current_version)
-            self.version_str = f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+            self.version_str = (
+                f"{self.new_version[0]}.{self.new_version[1]}.{self.new_version[2]}"
+            )
             print(f"New version: {self.version_str}")
-            
+
             if self.dry_run:
                 print("🔍 Dry run mode: no changes will be made")
-            
+
             # Run linting checks if not skipped
             if not skip_lint:
                 print("\n=== Running linting checks ===")
                 if not self.run_linting(auto_fix=auto_format):
                     if auto_format:
                         print("\n⚠️ Auto-formatting was applied but some issues remain.")
-                        print("   Please fix the remaining issues manually and try again.")
+                        print(
+                            "   Please fix the remaining issues manually and try again."
+                        )
                     else:
-                        print("\n⚠️ Linting checks failed. Run with --auto-format to attempt automatic fixes.")
+                        print(
+                            "\n⚠️ Linting checks failed. Run with --auto-format to attempt automatic fixes."
+                        )
                     return False
             else:
                 print("\n=== Skipping linting checks ===")
-                
+
             # Run tests if not skipped
             if not skip_tests:
                 print("\n=== Running tests ===")
                 if not self.run_tests():
-                    print("\n⚠️ Tests failed. Please fix the failing tests before releasing.")
+                    print(
+                        "\n⚠️ Tests failed. Please fix the failing tests before releasing."
+                    )
                     return False
             else:
                 print("\n=== Skipping tests ===")
-                
+
             # Update version in files
             print("\n=== Updating version ===")
             self.update_version_in_files(self.new_version)
-            
+
             # Commit version changes
             print("\n=== Committing version changes ===")
             self.commit_version_changes()
-            
+
             # Build package
             print("\n=== Building package ===")
             if not self.build_package():
-                print("\n⚠️ Package build failed. Please fix the build issues and try again.")
+                print(
+                    "\n⚠️ Package build failed. Please fix the build issues and try again."
+                )
                 return False
-                
+
             # Verify installation
             print("\n=== Verifying installation ===")
             if not self.verify_installation():
-                print("\n⚠️ Installation verification failed. The package may not be installable.")
+                print(
+                    "\n⚠️ Installation verification failed. The package may not be installable."
+                )
                 return False
-                
+
             # Only create the git tag after all tests and verification have passed
             print("\n=== Creating git tag ===")
             self.create_git_tag()
-            
+
             # Ask for confirmation before uploading
             print("\n=== Upload to PyPI ===")
             if self.test_pypi:
@@ -627,17 +657,17 @@ class ReleaseManager:
                 if response.lower() != "y":
                     print("Aborted upload")
                     return True  # Return True because this is a user decision, not an error
-                
+
                 # Upload to PyPI
                 self.upload_to_pypi()
-                
+
                 # Ask to push changes and tag
                 push_response = input("Push changes and tag to remote? [y/N] ")
                 if push_response.lower() == "y":
                     self.push_changes()
-            
+
             print(f"\n✨ Released version {self.version_str}")
-            
+
             # Suggest next steps
             print("\n📝 Next steps:")
             print(
@@ -647,15 +677,16 @@ class ReleaseManager:
             print(
                 f"3. Verify the package is available: pip install bundestag-protocol-extractor=={self.version_str}"
             )
-            
+
             return True
-            
+
         except ReleaseError as e:
             print(f"\n❌ Release failed: {e}")
             return False
         except Exception as e:
             print(f"\n❌ Unexpected error: {e}")
             import traceback
+
             traceback.print_exc()
             return False
         finally:
@@ -678,21 +709,17 @@ def main():
     parser.add_argument(
         "--test", action="store_true", help="Upload to TestPyPI instead of PyPI"
     )
+    parser.add_argument("--skip-lint", action="store_true", help="Skip linting checks")
+    parser.add_argument("--skip-tests", action="store_true", help="Skip running tests")
     parser.add_argument(
-        "--skip-lint", action="store_true", help="Skip linting checks"
-    )
-    parser.add_argument(
-        "--skip-tests", action="store_true", help="Skip running tests"
-    )
-    parser.add_argument(
-        "--auto-format", 
-        action="store_true", 
-        help="Automatically fix formatting issues with Black and isort"
+        "--auto-format",
+        action="store_true",
+        help="Automatically fix formatting issues with Black and isort",
     )
     parser.add_argument(
         "--format-only",
         action="store_true",
-        help="Only run formatting (Black and isort) without proceeding with release"
+        help="Only run formatting (Black and isort) without proceeding with release",
     )
     args = parser.parse_args()
 
@@ -711,14 +738,14 @@ def main():
 
     # Create release manager
     manager = ReleaseManager(args.bump, args.dry_run, args.test)
-    
+
     # Run the release process
     success = manager.release(
         auto_format=args.auto_format,
         skip_lint=args.skip_lint,
-        skip_tests=args.skip_tests
+        skip_tests=args.skip_tests,
     )
-    
+
     if not success:
         print("\n❌ Release process failed! See errors above.")
         print("\n💡 Possible solutions:")
@@ -726,7 +753,7 @@ def main():
         print("   - Run with --format-only to just fix formatting without releasing")
         print("   - Fix issues manually and try again")
         sys.exit(1)
-    
+
     print("\n✅ Release process completed successfully!")
 
 

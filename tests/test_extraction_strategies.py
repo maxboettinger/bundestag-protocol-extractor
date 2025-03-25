@@ -1,17 +1,19 @@
 """Tests for the extraction strategies."""
-import pytest
+
 import xml.etree.ElementTree as ET
-from unittest.mock import MagicMock
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+from pytest.mock import MagicMock
+
+import pytest
 
 from bundestag_protocol_extractor.api.client import BundestagAPIClient
-from bundestag_protocol_extractor.models.schema import PlenarProtocol, Speech, Person
+from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech
 from bundestag_protocol_extractor.parsers.extraction_strategies import (
     ExtractionStrategy,
-    XMLExtractionStrategy,
-    PatternExtractionStrategy,
+    ExtractionStrategyFactory,
     PageExtractionStrategy,
-    ExtractionStrategyFactory
+    PatternExtractionStrategy,
+    XMLExtractionStrategy,
 )
 
 
@@ -20,16 +22,12 @@ def mock_extraction_setup():
     """Set up test fixtures for extraction strategies."""
     # Create a mock API client
     api_client = MagicMock(spec=BundestagAPIClient)
-    
+
     # Create a test person
     person = Person(
-        id=9876,
-        nachname="Mustermann",
-        vorname="Max",
-        titel="Dr.",
-        fraktion="CDU/CSU"
+        id=9876, nachname="Mustermann", vorname="Max", titel="Dr.", fraktion="CDU/CSU"
     )
-    
+
     # Create test speeches
     speeches = [
         Speech(
@@ -43,10 +41,10 @@ def mock_extraction_setup():
             page_start="123",
             extraction_method="none",
             extraction_status="pending",
-            extraction_confidence=0.0
+            extraction_confidence=0.0,
         )
     ]
-    
+
     # Create a mock protocol
     protocol = PlenarProtocol(
         id=12345,
@@ -55,14 +53,15 @@ def mock_extraction_setup():
         date="2023-01-01",
         title="Test Protocol",
         herausgeber="Deutscher Bundestag",
-        full_text="This is a test protocol with some text. Deutscher Bundestag – 20. Wahlperiode – 123. Sitzung. Abg. Max Mustermann (CDU/CSU): This is a test speech."
+        full_text="This is a test protocol with some text. Deutscher Bundestag – 20. Wahlperiode – 123. Sitzung. Abg. Max Mustermann (CDU/CSU): This is a test speech.",
     )
-    
+
     # Add speeches to protocol
     protocol.speeches = speeches.copy()
-    
+
     # Set up mocked XML response
-    xml_root = ET.fromstring("""
+    xml_root = ET.fromstring(
+        """
     <protokoll>
         <id>12345</id>
         <sitzungsverlauf>
@@ -81,14 +80,15 @@ def mock_extraction_setup():
             </rede>
         </sitzungsverlauf>
     </protokoll>
-    """)
-    
+    """
+    )
+
     return {
         "api_client": api_client,
         "protocol": protocol,
         "speeches": speeches,
         "person": person,
-        "xml_root": xml_root
+        "xml_root": xml_root,
     }
 
 
@@ -96,21 +96,21 @@ def test_factory_creation(mock_extraction_setup):
     """Test creating strategies with the factory."""
     api_client = mock_extraction_setup["api_client"]
     factory = ExtractionStrategyFactory(api_client)
-    
+
     # Test creating individual strategies
     xml_strategy = factory.create_strategy("xml")
     assert isinstance(xml_strategy, XMLExtractionStrategy)
-    
+
     pattern_strategy = factory.create_strategy("pattern")
     assert isinstance(pattern_strategy, PatternExtractionStrategy)
-    
+
     page_strategy = factory.create_strategy("page")
     assert isinstance(page_strategy, PageExtractionStrategy)
-    
+
     # Test creating an unknown strategy
     unknown_strategy = factory.create_strategy("unknown")
     assert unknown_strategy is None
-    
+
     # Test creating tiered strategy list
     strategies = factory.create_tiered_strategy_list()
     assert len(strategies) == 3
@@ -125,7 +125,7 @@ def test_xml_strategy(mock_extraction_setup):
     protocol = mock_extraction_setup["protocol"]
     speeches = mock_extraction_setup["speeches"]
     xml_root = mock_extraction_setup["xml_root"]
-    
+
     # Set up the mock API client to return our XML
     api_client.get_plenarprotokoll_xml.return_value = xml_root
     api_client.parse_speeches_from_xml.return_value = [
@@ -142,25 +142,28 @@ def test_xml_strategy(mock_extraction_setup):
             "paragraphs": [
                 {"text": "This is the speech content from XML.", "type": ""},
                 {"text": "Some comment", "type": "kommentar"},
-                {"text": "More content.", "type": ""}
+                {"text": "More content.", "type": ""},
             ],
-            "comments": ["Some comment"]
+            "comments": ["Some comment"],
         }
     ]
-    
+
     # Create the strategy
     strategy = XMLExtractionStrategy(api_client)
-    
+
     # Test extraction
     result = strategy.extract(protocol, speeches.copy())
-    
+
     # Verify the result
     assert len(result) == 1
-    assert result[0].text == "This is the speech content from XML.\n\nSome comment\n\nMore content."
+    assert (
+        result[0].text
+        == "This is the speech content from XML.\n\nSome comment\n\nMore content."
+    )
     assert result[0].extraction_method == "xml"
     assert result[0].extraction_status == "complete"
     assert result[0].extraction_confidence == 1.0
-    
+
     # Verify the API client was called correctly
     api_client.get_plenarprotokoll_xml.assert_called_once()
     api_client.parse_speeches_from_xml.assert_called_once_with(xml_root)
@@ -171,16 +174,16 @@ def test_xml_strategy_failure(mock_extraction_setup):
     api_client = mock_extraction_setup["api_client"]
     protocol = mock_extraction_setup["protocol"]
     speeches = mock_extraction_setup["speeches"]
-    
+
     # Set up the mock API client to return None for XML
     api_client.get_plenarprotokoll_xml.return_value = None
-    
+
     # Create the strategy
     strategy = XMLExtractionStrategy(api_client)
-    
+
     # Test extraction
     result = strategy.extract(protocol, speeches.copy())
-    
+
     # Verify the result
     assert len(result) == 1
     assert "EXTRACTION_FAILED" in result[0].text
@@ -193,39 +196,39 @@ def test_pattern_strategy(mock_extraction_setup):
     """Test the pattern extraction strategy."""
     protocol = mock_extraction_setup["protocol"]
     speeches = mock_extraction_setup["speeches"]
-    
+
     # Add more detailed text to the protocol
     protocol.full_text = """
     Deutscher Bundestag – 20. Wahlperiode – 123. Sitzung.
-    
+
     Präsident Dr. Wilhelm: Ich eröffne die Sitzung.
-    
+
     Als nächsten Redner rufe ich den Abgeordneten Dr. Max Mustermann von der CDU/CSU-Fraktion auf.
-    
+
     (Beifall bei der CDU/CSU)
-    
+
     Dr. Max Mustermann (CDU/CSU):
-    
+
     Sehr geehrter Herr Präsident! Liebe Kolleginnen und Kollegen!
-    
+
     Dies ist eine Rede für den Patternextraktionstest. Ich hoffe, dass dieser
     Test erfolgreich sein wird.
-    
+
     (Beifall bei der CDU/CSU)
-    
+
     Vielen Dank für Ihre Aufmerksamkeit.
-    
+
     (Beifall bei der CDU/CSU)
-    
+
     Präsident Dr. Wilhelm: Vielen Dank, Herr Kollege Mustermann.
     """
-    
+
     # Create the strategy
     strategy = PatternExtractionStrategy()
-    
+
     # Test extraction
     result = strategy.extract(protocol, speeches.copy())
-    
+
     # Verify the result
     assert len(result) == 1
     assert "Sehr geehrter Herr Präsident" in result[0].text
@@ -239,74 +242,74 @@ def test_page_strategy(mock_extraction_setup):
     """Test the page extraction strategy."""
     protocol = mock_extraction_setup["protocol"]
     speeches = mock_extraction_setup["speeches"]
-    
+
     # Update the speech page start to match our test data
     speeches[0].page_start = "123"
-    
+
     # Set up a protocol with page markers that match the exact pattern in PageExtractionStrategy.PAGE_PATTERN
     protocol.full_text = """
     Deutscher Bundestag – 20. Wahlperiode – 122. Sitzung.
-    
+
     Previous page content.
-    
+
     Deutscher Bundestag – 20. Wahlperiode – 123. Sitzung.
-    
+
     This is text on page 123 that should be extracted.
     It contains page-based extraction content.
-    
+
     Deutscher Bundestag – 20. Wahlperiode – 124. Sitzung.
-    
+
     Next page content.
     """
-    
+
     # Create the strategy
     strategy = PageExtractionStrategy()
-    
+
     # Test extraction
     result = strategy.extract(protocol, speeches.copy())
-    
+
     # Verify the result
     assert len(result) == 1
-    
+
     # The page strategy adds content from around page_start_idx + 100 to handle page headers
     # It also adds a specific note about page-based extraction
     text = result[0].text
-    
+
     # Check for expected content - the actual text content should be in the result
     assert "extracted" in text
-    
+
     # The page strategy adds a specific disclaimer note
     assert "[Note: This text was extracted using page-based extraction" in text
-    
+
     # Check extraction metadata properties
     assert result[0].extraction_method == "page"
-    
+
     # Page extraction might be marked as partial if text is short (<500 chars)
     # We need to test for either status since it depends on length
     assert result[0].extraction_status in ["complete", "partial"]
-    
+
     # Page strategy has base confidence of 0.4, but can be adjusted by length
     # We expect it to be at most 0.4 (could be lower if adjusted by confidence_multiplier)
     assert 0 < result[0].extraction_confidence <= 0.4
-    
+
 
 def test_extraction_metadata():
     """Test extraction metadata calculation."""
     # Create a basic strategy
     strategy = PageExtractionStrategy()
-    
+
     # Test successful extraction
     metadata = strategy.get_extraction_metadata(True)
     assert metadata["extraction_method"] == "page"
     assert metadata["extraction_status"] == "complete"
     assert metadata["extraction_confidence"] == 0.4
-    
+
     # Test partial extraction
     metadata = strategy.get_extraction_metadata(True, partial=True)
     assert metadata["extraction_method"] == "page"
     assert metadata["extraction_status"] == "partial"
     assert metadata["extraction_confidence"] == 0.2  # 50% of base confidence
-    
+
     # Test failed extraction
     metadata = strategy.get_extraction_metadata(False)
     assert metadata["extraction_method"] == "page"
@@ -315,4 +318,4 @@ def test_extraction_metadata():
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main()

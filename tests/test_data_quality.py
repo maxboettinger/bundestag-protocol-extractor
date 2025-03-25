@@ -1,6 +1,8 @@
 """Tests for the data_quality module."""
-import pytest
+
 from pathlib import Path
+
+import pytest
 
 from bundestag_protocol_extractor.utils.data_quality import DataQualityReporter
 
@@ -8,123 +10,125 @@ from bundestag_protocol_extractor.utils.data_quality import DataQualityReporter
 def test_generate_quality_report(mock_speeches_df, mock_quality_reporter):
     """Test generating a quality report."""
     report = mock_quality_reporter.generate_quality_report(mock_speeches_df)
-    
+
     # Check basic structure
     assert "total_speeches" in report
     assert "extraction_methods" in report
     assert "extraction_status" in report
     assert "confidence_metrics" in report
     assert "text_metrics" in report
-    
+
     # Check counts
     assert report["total_speeches"] == 10
     assert report["extraction_methods"]["counts"]["xml"] == 4
-    
+
     # Check confidence metrics
     assert 0.6 < report["confidence_metrics"]["average"] < 0.7
 
 
-def test_save_quality_report(temp_directory, mock_quality_reporter, mock_quality_report):
+def test_save_quality_report(
+    temp_directory, mock_quality_reporter, mock_quality_report
+):
     """Test saving a quality report to a file."""
     path = mock_quality_reporter.save_quality_report(mock_quality_report, "test_report")
-    
+
     # Check that the file exists
     assert path.exists()
-    
+
     # Check the file extension
     assert path.suffix == ".json"
 
 
-def test_generate_visualizations(temp_directory, mock_speeches_df, mock_quality_reporter):
+def test_generate_visualizations(
+    temp_directory, mock_speeches_df, mock_quality_reporter
+):
     """Test generating visualizations."""
     visualizations = mock_quality_reporter.generate_quality_visualizations(
-        df_speeches=mock_speeches_df,
-        base_filename="test_vis",
-        save_plots=True
+        df_speeches=mock_speeches_df, base_filename="test_vis", save_plots=True
     )
-    
+
     # Check that we got visualization paths
     assert len(visualizations) > 0
-    
+
     # Check specific visualizations
     assert "method_distribution" in visualizations
     assert "status_distribution" in visualizations
     assert "confidence_distribution" in visualizations
-    
+
     # When save_plots is True, check that we got Path objects
     for key, value in visualizations.items():
         if isinstance(value, Path):
             assert value.exists()
-    
+
     # Test without saving plots
     vis_objects = mock_quality_reporter.generate_quality_visualizations(
-        df_speeches=mock_speeches_df,
-        base_filename="test_vis",
-        save_plots=False
+        df_speeches=mock_speeches_df, base_filename="test_vis", save_plots=False
     )
-    
+
     # Check that we got visualization objects
     assert len(vis_objects) > 0
 
 
-def test_create_html_report(temp_directory, mock_quality_reporter, mock_quality_report, mock_visualizations):
+def test_create_html_report(
+    temp_directory, mock_quality_reporter, mock_quality_report, mock_visualizations
+):
     """Test creating an HTML report."""
     html_path = mock_quality_reporter.create_html_report(
         report=mock_quality_report,
         visualizations=mock_visualizations,
-        filename="test_report.html"
+        filename="test_report.html",
     )
-    
+
     # Check that the file exists
     assert html_path.exists()
-    
+
     # Check the file extension
     assert html_path.suffix == ".html"
-    
+
     # Check the content structure based on the HTML template in data_quality.py
     with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
-        
+
         # Basic document structure
         assert "<!DOCTYPE html>" in content
-        assert "<html lang=\"en\">" in content
+        assert '<html lang="en">' in content
         assert "<head>" in content
         assert "</head>" in content
         assert "<body>" in content
         assert "</body>" in content
         assert "</html>" in content
-        
+
         # Check for specific sections from the template
         assert "<title>Bundestag Protocol Extraction Quality Report</title>" in content
         assert "<h1>Bundestag Protocol Extraction Quality Report</h1>" in content
         assert "<h2>Quality Dashboard</h2>" in content
         assert "<h2>Key Metrics</h2>" in content
         assert "<h2>Detailed Visualizations</h2>" in content
-        
+
         # Check for metric sections (using class names from template)
-        assert "class=\"metrics\"" in content
-        assert "class=\"metric-card\"" in content
-        assert "class=\"metric-title\"" in content
-        
+        assert 'class="metrics"' in content
+        assert 'class="metric-card"' in content
+        assert 'class="metric-title"' in content
+
         # Check for specific data from the mock_quality_report
         assert f"Total Speeches: {mock_quality_report['total_speeches']}" in content
-        
+
         # Check for extraction method data
         xml_count = mock_quality_report["extraction_methods"]["counts"]["xml"]
         assert f"XML: {xml_count}" in content
-        
+
         # Check for extraction status data
         complete_count = mock_quality_report["extraction_status"]["counts"]["complete"]
         assert f"Complete: {complete_count}" in content
-        
+
         # Check for confidence metrics
         avg_confidence = mock_quality_report["confidence_metrics"]["average"]
         confidence_str = f"Average Confidence: {avg_confidence:.2f}"
         assert confidence_str in content
-        
+
         # Check for recommendations section
         assert "<h2>Recommendations for Researchers</h2>" in content
         assert "For high precision analysis:" in content
-        
+
         # Check for footer
         assert "Generated by Bundestag Protocol Extractor" in content
