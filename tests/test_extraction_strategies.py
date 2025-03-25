@@ -1,9 +1,9 @@
 """Tests for the extraction strategies."""
 
 import xml.etree.ElementTree as ET
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from bundestag_protocol_extractor.api.client import BundestagAPIClient
 from bundestag_protocol_extractor.models.schema import Person, PlenarProtocol, Speech

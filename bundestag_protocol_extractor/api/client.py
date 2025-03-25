@@ -9,7 +9,7 @@ import os
 import re
 import time
 import xml.etree.ElementTree as ET
-from hashlib import md5
+# import removed: from hashlib import md5
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urljoin
@@ -165,7 +165,7 @@ class BundestagAPIClient:
                 return response.content.decode("utf-8")
             return response.json()
 
-        except requests.exceptions.HTTPError as e:
+        except requests.exceptions.HTTPError:
             # Log the full URL that failed for easier debugging
             full_url = response.request.url
             logger.error(f"API request failed: {full_url}")
