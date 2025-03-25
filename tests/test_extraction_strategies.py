@@ -1,6 +1,8 @@
 """Tests for the extraction strategies."""
 
+import os
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -313,6 +315,46 @@ def test_extraction_metadata():
     assert metadata["extraction_method"] == "page"
     assert metadata["extraction_status"] == "failed"
     assert metadata["extraction_confidence"] == 0.0
+
+
+def test_parse_speeches_from_real_xml():
+    """Test parsing speeches from a real XML file."""
+    # Initialize the API client with a test API key
+    api_client = BundestagAPIClient("test_api_key")
+    
+    # Path to the test XML file
+    xml_file_path = Path(__file__).parent / "data" / "20213.xml"
+    
+    # Skip test if the file doesn't exist
+    if not xml_file_path.exists():
+        pytest.skip(f"Test XML file {xml_file_path} not found")
+    
+    # Parse the XML file
+    with open(xml_file_path, "r", encoding="utf-8") as f:
+        xml_content = f.read()
+    
+    # Parse the XML
+    root = ET.fromstring(xml_content)
+    
+    # Test the parse_speeches_from_xml method
+    speeches = api_client.parse_speeches_from_xml(root)
+    
+    # Verify basic expectations
+    assert speeches is not None
+    assert isinstance(speeches, list)
+    assert len(speeches) > 0
+    
+    # Verify that we have the expected speech attributes
+    required_keys = ["id", "speaker_id", "speaker_full_name", "text"]
+    for speech in speeches:
+        for key in required_keys:
+            assert key in speech, f"Expected key {key} in speech data"
+
+    # Test finding the speeches with presidential announcements
+    presidential_speeches = [s for s in speeches if s.get("is_presidential_announcement", False)]
+    
+    # Log the number of speeches found
+    print(f"Found {len(speeches)} speeches, {len(presidential_speeches)} presidential announcements")
 
 
 if __name__ == "__main__":

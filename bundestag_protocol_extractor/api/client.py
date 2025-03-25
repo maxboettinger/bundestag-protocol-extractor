@@ -799,15 +799,28 @@ class BundestagAPIClient:
                             "Als Nächste hat das Wort zur Geschäftsordnung",
                             "Als Nächster hat das Wort zur Geschäftsordnung",
                         ]
-                        # Check the next paragraph for the announcement pattern
-                        next_p = rede.find(".//p", after=elem)
-                        if next_p is not None and next_p.text:
-                            next_text = next_p.text.strip()
-                            if any(
-                                pattern in next_text
-                                for pattern in announcement_patterns
-                            ):
-                                is_presidential_announcement = True
+                        # Find all paragraphs and check if any after current element contain the announcement pattern
+                        all_paragraphs = rede.findall(".//p")
+                        
+                        # Find the index of current element's parent in the list of paragraphs
+                        # We'll look at paragraphs after this index
+                        elem_index = -1
+                        for i, p in enumerate(all_paragraphs):
+                            # Check if this paragraph contains or is parent of our current element
+                            if p == elem or elem in p.iter():
+                                elem_index = i
+                                break
+                        
+                        # If we found the element, check subsequent paragraphs
+                        if elem_index >= 0 and elem_index + 1 < len(all_paragraphs):
+                            next_p = all_paragraphs[elem_index + 1]
+                            if next_p is not None and next_p.text:
+                                next_text = next_p.text.strip()
+                                if any(
+                                    pattern in next_text
+                                    for pattern in announcement_patterns
+                                ):
+                                    is_presidential_announcement = True
 
             # Combine all paragraphs into a single text
             full_text = "\n\n".join([p["text"] for p in paragraphs])
